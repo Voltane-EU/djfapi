@@ -1,0 +1,6 @@
+python-jose[cryptography]
+django
+fastapi
+pydantic>=1.8
+requests
+langcodes
