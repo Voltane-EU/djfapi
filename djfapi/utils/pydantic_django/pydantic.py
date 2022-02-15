@@ -3,8 +3,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, validate_model
 from django.db import models
 from django.db.models.manager import Manager
+from djutils.asyncio import AllowAsyncUnsafe
 from ...security.jwt import access as access_ctx
-from ..django import AllowAsyncUnsafe
 from .django_to_pydantic import transfer_from_orm
 
 

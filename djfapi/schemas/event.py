@@ -10,7 +10,10 @@ try:
 except ImportError:
     sentry_sdk = None
 
-from ..security.jwt import access as access_ctx
+
+def _get_access_ctx():
+    from ..security.jwt import access as access_ctx
+    return access_ctx.get()
 
 
 def default_eid():
@@ -27,21 +30,21 @@ def _get_flow_id():
 
 def _get_uid() -> Optional[str]:
     try:
-        return access_ctx.get().user_id
+        return _get_access_ctx().user_id
 
     except LookupError:
         return
 
 def _get_scopes() -> list:
     try:
-        return access_ctx.get().token.aud
+        return _get_access_ctx().token.aud
 
     except LookupError:
         return []
 
 def _get_roles() -> list:
     try:
-        return access_ctx.get().token.rls
+        return _get_access_ctx().token.rls
 
     except LookupError:
         return []
