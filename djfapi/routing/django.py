@@ -1,11 +1,12 @@
 from functools import partial
-import inspect
 from typing import List, Optional, Type, TypeVar
 from collections import OrderedDict
+import forge
 from django.db import models
 from pydantic import validate_arguments
 from fastapi import APIRouter, Depends, Request, Security, Path
 from fastapi.security.base import SecurityBase
+from ..schemas import Access
 from ..utils.fastapi import Pagination, depends_pagination
 from . import BaseRouter, RouterSchema
 
@@ -24,35 +25,40 @@ class DjangoRouterSchema(RouterSchema):
 
     model: Type[TDjangoModel]
 
-    def objects_get_filtered(self) -> List[TDjangoModel]:
-        return list(self.model.objects.filter())
+    def objects_filter(self, access: Optional[Access] = None) -> models.Q:
+        return models.Q()
 
-    def objects_get_by_id(self, id: str) -> TDjangoModel:
-        return self.model.objects.get(id=id)
+    def objects_get_filtered(self, access: Optional[Access] = None) -> List[TDjangoModel]:
+        return list(self.model.objects.filter(self.objects_filter(access)))
+
+    def objects_get_by_id(self, id: str, access: Optional[Access] = None) -> TDjangoModel:
+        return self.model.objects.filter(self.objects_filter(access)).get(id=id)
+
+    def _security_signature(self, method):
+        if not self.security:
+            return []
+
+        return [
+            forge.kwarg('access', type=Access, default=Security(self.security)),
+        ]
 
     def _create_endpoint_list(self):
-        def endpoint():
+        def endpoint(access: Optional[Access] = None):
             return self.list(items=[self.get.from_orm(obj) for obj in self.objects_get_filtered()])
 
-        return endpoint
+        return forge.sign(*[
+            *self._security_signature('list'),
+        ])(endpoint)
 
     def _create_endpoint_get(self):
-        def endpoint(id: str = Path(...)):
-            obj = self.objects_get_by_id(id)
+        def endpoint(*, id: str = Path(...), access: Optional[Access] = None, **kwargs):
+            obj = self.objects_get_by_id(id, access)
             return self.get.from_orm(obj)
 
-        signature = inspect.signature(endpoint)
-        parameters = OrderedDict(signature.parameters)
-        
-        parameters.update(id=parameters['id'].replace(
-            default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length),
-        ))
-
-        signature.replace(parameters=parameters.values())
-
-        endpoint.__signature__ = signature
-
-        return endpoint
+        return forge.sign(*[
+            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            *self._security_signature('get'),
+        ])(endpoint)
 
     def _create_route_list(self):
         self.__router.add_api_route('', endpoint=self._create_endpoint_list())

@@ -67,7 +67,7 @@ class JWTToken(APIKeyHeader):
             'tenant_id': current_access.tenant_id,
         })
 
-        if scopes:
+        if scopes and scopes.scopes:
             audiences = current_access.token.has_audiences(scopes.scopes)
             if not audiences:
                 raise HTTPException(status_code=403, detail=Error(
