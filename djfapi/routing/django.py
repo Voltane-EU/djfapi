@@ -4,7 +4,7 @@ from collections import OrderedDict
 import forge
 from django.db import models
 from pydantic import validate_arguments
-from fastapi import APIRouter, Depends, Request, Security, Path
+from fastapi import APIRouter, Depends, Request, Security, Path, Body
 from fastapi.security.base import SecurityBase
 from ..schemas import Access
 from ..utils.fastapi import Pagination, depends_pagination
@@ -42,29 +42,87 @@ class DjangoRouterSchema(RouterSchema):
             forge.kwarg('access', type=Access, default=Security(self.security)),
         ]
 
-    def _create_endpoint_list(self):
-        def endpoint(access: Optional[Access] = None):
+
+    def endpoint_list(self, access: Optional[Access] = None):
             return self.list(items=[self.get.from_orm(obj) for obj in self.objects_get_filtered()])
 
+    def _create_endpoint_list(self):
         return forge.sign(*[
             *self._security_signature('list'),
-        ])(endpoint)
+        ])(self.endpoint_list)
 
-    def _create_endpoint_get(self):
-        def endpoint(*, id: str = Path(...), access: Optional[Access] = None, **kwargs):
+
+    def endpoint_post(self, *, data, access: Optional[Access] = None, **kwargs):
+            obj = self.object_create(data)
+            return self.get.from_orm(obj)
+
+    def _create_endpoint_post(self):
+        return forge.sign(*[
+            forge.kwarg('data', type=self.create, default=Body(...)),
+            *self._security_signature('post'),
+        ])(self.endpoint_post)
+
+
+    def endpoint_get(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
             obj = self.objects_get_by_id(id, access)
             return self.get.from_orm(obj)
 
+    def _create_endpoint_get(self):
         return forge.sign(*[
             forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
             *self._security_signature('get'),
-        ])(endpoint)
+        ])(self.endpoint_get)
+
+
+    def endpoint_patch(self, *, id: str = Path(...), data, access: Optional[Access] = None, **kwargs):
+            obj = self.objects_get_by_id(id, access)
+            return self.get.from_orm(obj)
+
+    def _create_endpoint_patch(self):
+        return forge.sign(*[
+            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            forge.kwarg('data', type=self.update, default=Body(...)),
+            *self._security_signature('patch'),
+        ])(self.endpoint_patch)
+
+
+    def endpoint_put(self, *, id: str = Path(...), data, access: Optional[Access] = None, **kwargs):
+        obj = self.objects_get_by_id(id, access)
+        return self.get.from_orm(obj)
+
+    def _create_endpoint_put(self):
+        return forge.sign(*[
+            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            forge.kwarg('data', type=self.update, default=Body(...)),
+            *self._security_signature('put'),
+        ])(self.endpoint_put)
+
+    def endpoint_delete(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
+        obj = self.objects_get_by_id(id, access)
+
+    def _create_endpoint_delete(self):
+        return forge.sign(*[
+            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            *self._security_signature('delete'),
+        ])(self.endpoint_delete)
 
     def _create_route_list(self):
-        self.__router.add_api_route('', endpoint=self._create_endpoint_list())
+        self.__router.add_api_route('', methods=['GET'], endpoint=self._create_endpoint_list(), response_model=self.list)
+
+    def _create_route_post(self):
+        self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=self.get)
 
     def _create_route_get(self):
-        self.__router.add_api_route('/{id}', endpoint=self._create_endpoint_get())
+        self.__router.add_api_route('/{id}', methods=['GET'], endpoint=self._create_endpoint_get(), response_model=self.get)
+
+    def _create_route_patch(self):
+        self.__router.add_api_route('/{id}', methods=['PATCH'], endpoint=self._create_endpoint_patch(), response_model=self.get)
+
+    def _create_route_put(self):
+        self.__router.add_api_route('/{id}', methods=['PUT'], endpoint=self._create_endpoint_put(), response_model=self.get)
+
+    def _create_route_delete(self):
+        self.__router.add_api_route('/{id}', methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=204)
 
     def _create_router(self):
         self.__router = APIRouter(prefix=f'/{self.name}')
@@ -72,8 +130,18 @@ class DjangoRouterSchema(RouterSchema):
         if self.list and self.list is not ...:
             self._create_route_list()
 
+        if self.create and self.create is not ...:
+            self._create_route_post()
+
         if self.get and self.get is not ...:
             self._create_route_get()
+
+        if self.update and self.update is not ...:
+            self._create_route_patch()
+            self._create_route_put()
+
+        if self.delete:
+            self._create_route_delete()
 
     @property
     def router(self) -> APIRouter:

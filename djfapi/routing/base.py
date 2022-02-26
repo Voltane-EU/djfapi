@@ -12,6 +12,7 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     create: Optional[Type[BaseModel]] = None
     update: Optional[Type[BaseModel]] = None
     patch: Optional[Type[BaseModel]] = None
+    delete: bool = True
     children: List[RouterSchema] = []
     parent: Optional[RouterSchema] = None
     security: Optional[SecurityBase] = None
@@ -29,6 +30,9 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
 
         for child in self.children:
             child.parent = self
+
+
+RouterSchema.update_forward_refs()
 
 
 class BaseRouter(ABC):
