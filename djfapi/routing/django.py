@@ -1,13 +1,14 @@
 from functools import partial
-from typing import List, Optional, Type, TypeVar
-from collections import OrderedDict
+from typing import Any, List, Optional, Type, TypeVar
 import forge
 from django.db import models
-from pydantic import validate_arguments
-from fastapi import APIRouter, Depends, Request, Security, Path, Body
+from pydantic import BaseModel
+from fastapi import APIRouter, Security, Path, Body
 from fastapi.security.base import SecurityBase
 from ..schemas import Access
 from ..utils.fastapi import Pagination, depends_pagination
+from ..utils.pydantic_django import transfer_to_orm, TransferAction
+from .base import TBaseModel, TCreateModel, TUpdateModel
 from . import BaseRouter, RouterSchema
 
 
@@ -24,6 +25,11 @@ class DjangoRouterSchema(RouterSchema):
     __router = None
 
     model: Type[TDjangoModel]
+    get: Type[TBaseModel]
+    create: Type[TCreateModel]
+    update: Type[TUpdateModel]
+    delete_status: Optional[Any] = None
+    pagination_options: dict = {}
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         return models.Q()
@@ -31,8 +37,25 @@ class DjangoRouterSchema(RouterSchema):
     def objects_get_filtered(self, access: Optional[Access] = None) -> List[TDjangoModel]:
         return list(self.model.objects.filter(self.objects_filter(access)))
 
-    def objects_get_by_id(self, id: str, access: Optional[Access] = None) -> TDjangoModel:
+    def object_get_by_id(self, id: str, access: Optional[Access] = None) -> TDjangoModel:
         return self.model.objects.filter(self.objects_filter(access)).get(id=id)
+
+    def object_create(self, *, access: Optional[Access] = None, data: TCreateModel) -> TDjangoModel:
+        instance: TDjangoModel = self.model()
+        transfer_to_orm(data, instance, action=TransferAction.CREATE, access=access)
+
+        return instance
+
+    def object_update(self, *, access: Optional[Access] = None, instance: TDjangoModel, data: TUpdateModel, transfer_action: TransferAction) -> TDjangoModel:
+        transfer_to_orm(data, instance, action=transfer_action, access=access)
+
+    def object_delete(self, *, access: Optional[Access] = None, instance: TDjangoModel):
+        if self.delete_status:
+            instance.status = self.delete_status
+            instance.save()
+
+        else:
+            instance.delete()
 
     def _security_signature(self, method):
         if not self.security:
@@ -42,19 +65,22 @@ class DjangoRouterSchema(RouterSchema):
             forge.kwarg('access', type=Access, default=Security(self.security)),
         ]
 
+    def _path_signature_id(self):
+        return forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
 
     def endpoint_list(self, access: Optional[Access] = None):
-            return self.list(items=[self.get.from_orm(obj) for obj in self.objects_get_filtered()])
+        return self.list(items=[self.get.from_orm(obj) for obj in self.objects_get_filtered()])
 
     def _create_endpoint_list(self):
         return forge.sign(*[
             *self._security_signature('list'),
+            depends_pagination(**self.pagination_options),
         ])(self.endpoint_list)
 
 
-    def endpoint_post(self, *, data, access: Optional[Access] = None, **kwargs):
-            obj = self.object_create(data)
-            return self.get.from_orm(obj)
+    def endpoint_post(self, *, data: BaseModel, access: Optional[Access] = None, **kwargs):
+        obj = self.object_create(data)
+        return self.get.from_orm(obj)
 
     def _create_endpoint_post(self):
         return forge.sign(*[
@@ -64,45 +90,48 @@ class DjangoRouterSchema(RouterSchema):
 
 
     def endpoint_get(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
-            obj = self.objects_get_by_id(id, access)
-            return self.get.from_orm(obj)
+        obj = self.object_get_by_id(id, access)
+        return self.get.from_orm(obj)
 
     def _create_endpoint_get(self):
         return forge.sign(*[
-            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            self._path_signature_id(),
             *self._security_signature('get'),
         ])(self.endpoint_get)
 
 
-    def endpoint_patch(self, *, id: str = Path(...), data, access: Optional[Access] = None, **kwargs):
-            obj = self.objects_get_by_id(id, access)
-            return self.get.from_orm(obj)
+    def endpoint_patch(self, *, id: str = Path(...), data: TUpdateModel, access: Optional[Access] = None, **kwargs):
+        obj = self.object_get_by_id(id, access)
+        self.object_update(access=access, instance=obj, data=data, transfer_action=TransferAction.NO_SUBOBJECTS)
+        return self.get.from_orm(obj)
 
     def _create_endpoint_patch(self):
         return forge.sign(*[
-            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            self._path_signature_id(),
             forge.kwarg('data', type=self.update, default=Body(...)),
             *self._security_signature('patch'),
         ])(self.endpoint_patch)
 
 
     def endpoint_put(self, *, id: str = Path(...), data, access: Optional[Access] = None, **kwargs):
-        obj = self.objects_get_by_id(id, access)
+        obj = self.object_get_by_id(id, access)
+        self.object_update(access=access, instance=obj, data=data, transfer_action=TransferAction.SYNC)
         return self.get.from_orm(obj)
 
     def _create_endpoint_put(self):
         return forge.sign(*[
-            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            self._path_signature_id(),
             forge.kwarg('data', type=self.update, default=Body(...)),
             *self._security_signature('put'),
         ])(self.endpoint_put)
 
     def endpoint_delete(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
-        obj = self.objects_get_by_id(id, access)
+        obj = self.object_get_by_id(id, access)
+        self.object_delete(access=access, instance=obj)
 
     def _create_endpoint_delete(self):
         return forge.sign(*[
-            forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+            self._path_signature_id(),
             *self._security_signature('delete'),
         ])(self.endpoint_delete)
 

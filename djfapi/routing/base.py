@@ -1,17 +1,21 @@
 from __future__ import annotations
-from typing import List, Optional, Sequence, Type, Any
+from typing import List, Optional, Sequence, Type, Any, TypeVar
 from abc import ABC
 from pydantic import BaseModel, root_validator, create_model, Extra
 from fastapi.security.base import SecurityBase
 
 
+TBaseModel = TypeVar('TBaseModel', bound=BaseModel)
+TCreateModel = TypeVar('TCreateModel', bound=BaseModel)
+TUpdateModel = TypeVar('TUpdateModel', bound=BaseModel)
+
+
 class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     name: str
     list: Type[BaseModel]
-    get: Type[BaseModel]
-    create: Optional[Type[BaseModel]] = None
-    update: Optional[Type[BaseModel]] = None
-    patch: Optional[Type[BaseModel]] = None
+    get: Type[TBaseModel]
+    create: Optional[Type[TCreateModel]] = None
+    update: Optional[Type[TUpdateModel]] = None
     delete: bool = True
     children: List[RouterSchema] = []
     parent: Optional[RouterSchema] = None
