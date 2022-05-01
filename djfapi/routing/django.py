@@ -66,7 +66,7 @@ class DjangoRouterSchema(RouterSchema):
         ]
 
     def _path_signature_id(self):
-        return forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)),
+        return forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length))
 
     def endpoint_list(self, access: Optional[Access] = None):
         return self.list(items=[self.get.from_orm(obj) for obj in self.objects_get_filtered()])
@@ -76,7 +76,6 @@ class DjangoRouterSchema(RouterSchema):
             *self._security_signature('list'),
             depends_pagination(**self.pagination_options),
         ])(self.endpoint_list)
-
 
     def endpoint_post(self, *, data: BaseModel, access: Optional[Access] = None, **kwargs):
         obj = self.object_create(data)
@@ -88,7 +87,6 @@ class DjangoRouterSchema(RouterSchema):
             *self._security_signature('post'),
         ])(self.endpoint_post)
 
-
     def endpoint_get(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
         obj = self.object_get_by_id(id, access)
         return self.get.from_orm(obj)
@@ -98,7 +96,6 @@ class DjangoRouterSchema(RouterSchema):
             self._path_signature_id(),
             *self._security_signature('get'),
         ])(self.endpoint_get)
-
 
     def endpoint_patch(self, *, id: str = Path(...), data: TUpdateModel, access: Optional[Access] = None, **kwargs):
         obj = self.object_get_by_id(id, access)
@@ -111,7 +108,6 @@ class DjangoRouterSchema(RouterSchema):
             forge.kwarg('data', type=self.update, default=Body(...)),
             *self._security_signature('patch'),
         ])(self.endpoint_patch)
-
 
     def endpoint_put(self, *, id: str = Path(...), data, access: Optional[Access] = None, **kwargs):
         obj = self.object_get_by_id(id, access)
