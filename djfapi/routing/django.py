@@ -1,13 +1,14 @@
 from functools import partial
-from typing import Any, List, Optional, Type, TypeVar
+from typing import Any, List, Optional, Type, TypeVar, Union
 import forge
 from django.db import models
 from pydantic import BaseModel
-from fastapi import APIRouter, Security, Path, Body
+from fastapi import APIRouter, Security, Path, Body, Depends
 from fastapi.security.base import SecurityBase
-from ..schemas import Access
+from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
+from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
 from . import BaseRouter, RouterSchema
 
@@ -26,25 +27,34 @@ class DjangoRouterSchema(RouterSchema):
 
     model: Type[TDjangoModel]
     get: Type[TBaseModel]
-    create: Type[TCreateModel]
-    update: Type[TUpdateModel]
+    create: Type[TCreateModel] = None
+    update: Type[TUpdateModel] = None
     delete_status: Optional[Any] = None
     pagination_options: dict = {}
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         return models.Q()
 
-    def objects_get_filtered(self, access: Optional[Access] = None) -> List[TDjangoModel]:
-        return list(self.model.objects.filter(self.objects_filter(access)))
+    def objects_get_filtered(self, *, access: Optional[Access] = None, pagination: Pagination) -> List[TDjangoModel]:
+        return list(pagination.query(self.model.objects, self.objects_filter(access)))
 
     def object_get_by_id(self, id: str, access: Optional[Access] = None) -> TDjangoModel:
         return self.model.objects.filter(self.objects_filter(access)).get(id=id)
 
-    def object_create(self, *, access: Optional[Access] = None, data: TCreateModel) -> TDjangoModel:
-        instance: TDjangoModel = self.model()
-        transfer_to_orm(data, instance, action=TransferAction.CREATE, access=access)
+    def object_create(self, *, access: Optional[Access] = None, data: Union[TCreateModel, List[TCreateModel]]) -> List[TDjangoModel]:
+        if not isinstance(data, list):
+            data = [data]
 
-        return instance
+        if not self.create_multi and len(data) > 1:
+            raise ValidationError(detail=Error(code='create_multi_disabled'))
+
+        instances = []
+        for el in data:
+            instance: TDjangoModel = self.model()
+            transfer_to_orm(el, instance, action=TransferAction.CREATE, access=access)
+            instances.append(instance)
+
+        return instances
 
     def object_update(self, *, access: Optional[Access] = None, instance: TDjangoModel, data: TUpdateModel, transfer_action: TransferAction) -> TDjangoModel:
         transfer_to_orm(data, instance, action=transfer_action, access=access)
@@ -68,22 +78,35 @@ class DjangoRouterSchema(RouterSchema):
     def _path_signature_id(self):
         return forge.kwarg('id', type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length))
 
-    def endpoint_list(self, access: Optional[Access] = None):
-        return self.list(items=[self.get.from_orm(obj) for obj in self.objects_get_filtered()])
+    def endpoint_list(self, *, access: Optional[Access] = None, pagination: Pagination):
+        return self.list(items=[
+            self.get.from_orm(obj)
+            for obj in self.objects_get_filtered(
+                access=access,
+                pagination=pagination,
+            )
+        ])
 
     def _create_endpoint_list(self):
         return forge.sign(*[
             *self._security_signature('list'),
-            depends_pagination(**self.pagination_options),
+            forge.kwarg('pagination', type=Pagination, default=Depends(depends_pagination(**self.pagination_options))),
         ])(self.endpoint_list)
 
-    def endpoint_post(self, *, data: BaseModel, access: Optional[Access] = None, **kwargs):
+    def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
         obj = self.object_create(data)
+        if isinstance(obj, list):
+            return [self.get.from_orm(o) for o in obj]
+
         return self.get.from_orm(obj)
 
     def _create_endpoint_post(self):
+        create_type = self.create
+        if self.create_multi:
+            create_type = Union[self.create, List[self.create]]
+
         return forge.sign(*[
-            forge.kwarg('data', type=self.create, default=Body(...)),
+            forge.kwarg('data', type=create_type, default=Body(...)),
             *self._security_signature('post'),
         ])(self.endpoint_post)
 
@@ -135,7 +158,7 @@ class DjangoRouterSchema(RouterSchema):
         self.__router.add_api_route('', methods=['GET'], endpoint=self._create_endpoint_list(), response_model=self.list)
 
     def _create_route_post(self):
-        self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=self.get)
+        self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=Union[self.get, List[self.get]] if self.create_multi else self.get)
 
     def _create_route_get(self):
         self.__router.add_api_route('/{id}', methods=['GET'], endpoint=self._create_endpoint_get(), response_model=self.get)
