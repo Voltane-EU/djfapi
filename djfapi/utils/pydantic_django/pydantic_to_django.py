@@ -8,8 +8,9 @@ from pydantic.fields import SHAPE_SINGLETON, SHAPE_LIST, Undefined
 from django.db import models
 from django.db.models.fields.related_descriptors import ManyToManyDescriptor, ReverseManyToOneDescriptor
 from django.db.transaction import atomic
+from sentry_sdk import Hub
 from ...schemas import Access
-from ..sentry import instrument_span, span as span_ctx
+from ..sentry import instrument_span
 from ..pydantic import Reference
 from ..asyncio import is_async
 from .checks import check_field_access
@@ -70,7 +71,7 @@ def transfer_to_orm(
             created_submodels=created_submodels,
         )
 
-    span = span_ctx.get()
+    span = Hub.current.scope.span
     span.set_tag('transfer_to_orm.action', action)
     span.set_tag('transfer_to_orm.exclude_unset', exclude_unset)
     span.set_data('transfer_to_orm.access', access)

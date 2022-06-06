@@ -1,7 +1,7 @@
 from asyncio import coroutine, get_event_loop
 from functools import partial, wraps
 from typing import Callable, Optional
-from .sentry import instrument_span, span as span_ctx
+from .sentry import instrument_span
 
 
 def is_async():

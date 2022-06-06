@@ -3,7 +3,7 @@ from typing import Callable, Optional
 from asyncio import coroutine
 from functools import wraps
 from asgiref import sync
-from .sentry import instrument_span, span as span_ctx
+from .sentry import instrument_span
 
 
 def sync_to_async(callable: Optional[Callable] = None, **wrapper_kwargs):

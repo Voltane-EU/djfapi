@@ -8,10 +8,11 @@ from django.db import models
 from django.db.models.manager import Manager
 from django.db.models.fields.related_descriptors import ManyToManyDescriptor, ReverseManyToOneDescriptor
 from django.utils.functional import cached_property
+from sentry_sdk import Hub
 from ...schemas import AccessScope
 from ...exceptions import AccessError
 from ...security.jwt import access as access_ctx
-from ..sentry import instrument_span, span as span_ctx
+from ..sentry import instrument_span
 from ..asyncio import is_async
 
 if os.getenv('USE_ASYNCIO'):
@@ -57,7 +58,6 @@ def transfer_from_orm(
         name: str = Field(orm_field=Address.name)
     ```
     """
-    span = span_ctx.get()
     if is_async():
         return sync_to_async(_transfer_from_orm)(
             pydantic_cls=pydantic_cls,
@@ -296,7 +296,7 @@ def _transfer_from_orm(
     pydantic_field_on_parent: Optional[ModelField] = None,
     filter_submodel: Optional[Mapping[Manager, models.Q]] = None,
 ) -> Union[BaseModel, Coroutine[None, None, BaseModel]]:
-    span = span_ctx.get()
+    span = Hub.current.scope.span
     span.set_tag('transfer_from_orm.pydantic_cls', pydantic_cls.__name__)
     span.set_tag('transfer_from_orm.django_cls', django_obj.__class__.__name__)
     span.set_data('transfer_from_orm.django_obj', django_obj)
