@@ -4,14 +4,14 @@ from typing import Callable, Optional, Union
 from sentry_sdk import Hub, start_span, capture_exception as sentry_capture_exception, set_tag
 
 
-def instrument_span(op: str, description: Optional[Union[str, Callable]] = None, force_new_span: bool = False, **instrument_kwargs):
+def instrument_span(op: Optional[str] = None, description: Optional[Union[str, Callable[..., str]]] = None, force_new_span: bool = False, **instrument_kwargs):
     def wrapper(wrapped):
         @wraps(wrapped)
         def with_instrumentation(*args, **kwargs):
             parent_span = Hub.current.scope.span
 
             span_args = {
-                'op': op,
+                'op': op or wrapped.__qualname__,
                 'description': description(*args, **kwargs) if callable(description) else description,
                 **instrument_kwargs,
             }
