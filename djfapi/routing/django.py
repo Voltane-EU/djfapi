@@ -32,11 +32,11 @@ class DjangoRouterSchema(RouterSchema):
     pagination_options: dict = {}
 
     def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+
         if self.create_multi:
             # create_multi is WIP
             raise NotImplementedError("create_multi is not supported for DjangoRouterSchema")
-
-        super().__init__(**data)
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         return models.Q()
