@@ -2,7 +2,6 @@ from functools import partial
 from typing import Any, List, Optional, Type, TypeVar, Union
 import forge
 from django.db import models
-from pydantic import BaseModel
 from fastapi import APIRouter, Security, Path, Body, Depends
 from fastapi.security.base import SecurityBase
 from ..schemas import Access, Error
@@ -32,6 +31,13 @@ class DjangoRouterSchema(RouterSchema):
     delete_status: Optional[Any] = None
     pagination_options: dict = {}
 
+    def __init__(self, **data: Any) -> None:
+        if self.create_multi:
+            # create_multi is WIP
+            raise NotImplementedError("create_multi is not supported for DjangoRouterSchema")
+
+        super().__init__(**data)
+
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         return models.Q()
 
@@ -45,7 +51,7 @@ class DjangoRouterSchema(RouterSchema):
         if not isinstance(data, list):
             data = [data]
 
-        if not self.create_multi and len(data) > 1:
+        elif not self.create_multi:
             raise ValidationError(detail=Error(code='create_multi_disabled'))
 
         instances = []
@@ -95,15 +101,15 @@ class DjangoRouterSchema(RouterSchema):
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
         obj = self.object_create(access=access, data=data)
-        if isinstance(obj, list):
+        if len(obj) > 1:
             return [self.get.from_orm(o) for o in obj]
 
-        return self.get.from_orm(obj)
+        return self.get.from_orm(obj[0])
 
     def _create_endpoint_post(self):
         create_type = self.create
         if self.create_multi:
-            create_type = Union[self.create, List[self.create]]
+            create_type = List[self.create]
 
         return forge.sign(*[
             forge.kwarg('data', type=create_type, default=Body(...)),

@@ -15,7 +15,7 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     list: Type[BaseModel]
     get: Type[TBaseModel]
     create: Optional[Type[TCreateModel]] = None
-    create_multi: bool = True
+    create_multi: bool = False
     update: Optional[Type[TUpdateModel]] = None
     delete: bool = True
     children: List[RouterSchema] = []
