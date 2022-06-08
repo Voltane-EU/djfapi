@@ -94,7 +94,7 @@ class DjangoRouterSchema(RouterSchema):
         ])(self.endpoint_list)
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
-        obj = self.object_create(data)
+        obj = self.object_create(access=access, data=data)
         if isinstance(obj, list):
             return [self.get.from_orm(o) for o in obj]
 
@@ -111,7 +111,7 @@ class DjangoRouterSchema(RouterSchema):
         ])(self.endpoint_post)
 
     def endpoint_get(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
-        obj = self.object_get_by_id(id, access)
+        obj = self.object_get_by_id(id, access=access)
         return self.get.from_orm(obj)
 
     def _create_endpoint_get(self):
@@ -121,7 +121,7 @@ class DjangoRouterSchema(RouterSchema):
         ])(self.endpoint_get)
 
     def endpoint_patch(self, *, id: str = Path(...), data: TUpdateModel, access: Optional[Access] = None, **kwargs):
-        obj = self.object_get_by_id(id, access)
+        obj = self.object_get_by_id(id, access=access)
         self.object_update(access=access, instance=obj, data=data, transfer_action=TransferAction.NO_SUBOBJECTS)
         return self.get.from_orm(obj)
 
@@ -133,7 +133,7 @@ class DjangoRouterSchema(RouterSchema):
         ])(self.endpoint_patch)
 
     def endpoint_put(self, *, id: str = Path(...), data, access: Optional[Access] = None, **kwargs):
-        obj = self.object_get_by_id(id, access)
+        obj = self.object_get_by_id(id, access=access)
         self.object_update(access=access, instance=obj, data=data, transfer_action=TransferAction.SYNC)
         return self.get.from_orm(obj)
 
@@ -145,7 +145,7 @@ class DjangoRouterSchema(RouterSchema):
         ])(self.endpoint_put)
 
     def endpoint_delete(self, *, id: str = Path(...), access: Optional[Access] = None, **kwargs):
-        obj = self.object_get_by_id(id, access)
+        obj = self.object_get_by_id(id, access=access)
         self.object_delete(access=access, instance=obj)
 
     def _create_endpoint_delete(self):
