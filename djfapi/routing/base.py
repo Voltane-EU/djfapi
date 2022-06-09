@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import List, Optional, Sequence, Type, Any, TypeVar
+from enum import Enum
+from typing import List, Optional, Sequence, Type, Any, TypeVar, Dict
 from abc import ABC
 from pydantic import BaseModel, root_validator, create_model, Extra
 from fastapi.security.base import SecurityBase
@@ -8,6 +9,16 @@ from fastapi.security.base import SecurityBase
 TBaseModel = TypeVar('TBaseModel', bound=BaseModel)
 TCreateModel = TypeVar('TCreateModel', bound=BaseModel)
 TUpdateModel = TypeVar('TUpdateModel', bound=BaseModel)
+
+
+class Method(Enum):
+    GET_LIST = 'list'
+    GET_AGGREGATE = 'aggregate'
+    GET = 'get'
+    POST = 'post'
+    PATCH = 'patch'
+    PUT = 'put'
+    DELETE = 'delete'
 
 
 class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
@@ -21,7 +32,7 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     children: List[RouterSchema] = []
     parent: Optional[RouterSchema] = None
     security: Optional[SecurityBase] = None
-    security_scopes: Optional[Sequence[str]] = None
+    security_scopes: Optional[Dict[Method, Sequence[str]]] = None
 
     @root_validator(pre=True)
     def _init_list(cls, values: dict):

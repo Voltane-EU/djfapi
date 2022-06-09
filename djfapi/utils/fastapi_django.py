@@ -1,4 +1,3 @@
-import os
 from typing import List, Optional, Union
 from enum import Enum
 from psycopg2 import errorcodes as psycopg2_error_codes
@@ -7,12 +6,6 @@ from django.db.models import Q, QuerySet, Manager, aggregates
 from django.db.utils import ProgrammingError
 from fastapi.exceptions import RequestValidationError
 from .fastapi import Pagination
-
-if os.getenv('USE_ASYNCIO'):
-    from .asyncio import sync_to_async
-
-else:
-    from .sync import sync_to_async
 
 
 class AggregationFunction(Enum):
@@ -23,7 +16,7 @@ class AggregationFunction(Enum):
     sum = 'sum'
 
 
-async def aggregation(
+def aggregation(
     objects: Union[QuerySet, Manager],
     *,
     q_filters: Q = Q(),
@@ -32,7 +25,6 @@ async def aggregation(
     group_by: Optional[List[str]] = None,
     pagination: Pagination,
 ):
-    @sync_to_async
     def aggregate():
         query = objects.filter(q_filters)
         fields = []
@@ -59,5 +51,5 @@ async def aggregation(
             raise
 
     return {
-        'values': await aggregate()
+        'values': aggregate()
     }

@@ -1,1 +1,1 @@
-from .base import BaseRouter, RouterSchema
+from .base import BaseRouter, RouterSchema, Method
