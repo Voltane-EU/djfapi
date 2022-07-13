@@ -22,6 +22,7 @@ TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
 class DjangoRouterSchema(RouterSchema):
     __router = None
 
+    parent: Optional['DjangoRouterSchema'] = None
     model: Type[TDjangoModel]
     get: Type[TBaseModel]
     create: Type[TCreateModel] = None
@@ -189,12 +190,21 @@ class DjangoRouterSchema(RouterSchema):
         else:
             instance.delete()
 
+    def _get_security_scopes(self, method: Method):
+        if self.security_scopes and self.security_scopes.get(method):
+            return self.security_scopes.get(method)
+
+        if self.parent:
+            return self.parent._get_security_scopes(method)
+
+        return None
+
     def _security_signature(self, method: Method):
         if not self.security:
             return []
 
         return [
-            forge.kwarg('access', type=Access, default=Security(self.security, scopes=self.security_scopes and self.security_scopes.get(method))),
+            forge.kwarg('access', type=Access, default=Security(self.security, scopes=self._get_security_scopes(method))),
         ]
 
     def _path_signature_id(self, include_self=True):
