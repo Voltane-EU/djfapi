@@ -11,6 +11,7 @@ from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
 from ..utils.fastapi_django import AggregationFunction, aggregation
+from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
 from . import BaseRouter, RouterSchema, Method
@@ -139,11 +140,15 @@ class DjangoRouterSchema(RouterSchema):
     def _create_route_delete(self):
         self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=204)
 
-    def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None):
+    def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, is_annotated: bool = False):
         if self.parent:
-            return getattr(self.parent.get_queryset(parent_ids[:-1], access).get(pk=parent_ids[-1]), self.related_name_on_parent).filter(self.objects_filter(access))
+            return getattr(self.parent.get_queryset(parent_ids[:-1], access, is_annotated).get(pk=parent_ids[-1]), self.related_name_on_parent).filter(self.objects_filter(access))
 
-        return self.model.objects.filter(self.objects_filter(access)).annotate(models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)))
+        queryset = self.model.objects.filter(self.objects_filter(access))
+        if is_annotated:
+            queryset = queryset.annotate(*[models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel))])
+
+        return queryset
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         if hasattr(self.model, 'tenant_id'):
@@ -234,7 +239,7 @@ class DjangoRouterSchema(RouterSchema):
         ])
 
     def search_filter(self, **kwargs) -> models.Q:
-        return models.Q(**kwargs)
+        return models.Q(**remove_none(kwargs))
 
     def search_filter_fields(self):
         fields = defaultdict(list)
@@ -338,7 +343,7 @@ class DjangoRouterSchema(RouterSchema):
         ids = self._get_ids(kwargs, include_self=False)
 
         return aggregation(
-            self.get_queryset(ids, access),
+            self.get_queryset(ids, access, is_annotated=True),
             q_filters=search,
             aggregation_function=aggregation_function,
             field=field,
