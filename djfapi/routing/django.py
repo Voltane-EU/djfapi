@@ -4,6 +4,7 @@ from enum import Enum
 from functools import cached_property, partial
 from typing import Any, List, Optional, Type, TypeVar, Union
 import forge
+from pydantic import create_model
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query
 from fastapi.security.base import SecurityBase
@@ -11,7 +12,7 @@ from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
 from ..utils.fastapi_django import AggregationFunction, aggregation
-from ..utils.pydantic import to_optional
+from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
@@ -40,6 +41,9 @@ class DjangoRouterSchema(RouterSchema):
         if self.create_multi:
             # create_multi is WIP
             raise NotImplementedError("create_multi is not supported for DjangoRouterSchema")
+
+    def _init_list(self):
+        self.list = create_model(f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get_referenced], ...))
 
     @property
     def name_singular(self) -> str:
@@ -82,6 +86,20 @@ class DjangoRouterSchema(RouterSchema):
             return fields
 
         return Enum(f'{self.model.__name__}Fields', {field: field for field in _get_model_fields(self.model)})
+
+    @cached_property
+    def get_referenced(self):
+        if not issubclass(self.get, ReferencedModel):
+            return include_reference()(self.get)
+
+        return self.get
+
+    @cached_property
+    def update_optional(self):
+        if not issubclass(self.update, OptionalModel):
+            return to_optional()(self.update)
+
+        return self.update
 
     @property
     def router(self) -> APIRouter:
@@ -127,16 +145,16 @@ class DjangoRouterSchema(RouterSchema):
         self.__router.add_api_route('/aggregate/{aggregation_function}/{field}', methods=['GET'], endpoint=self._create_endpoint_aggregate())  # TODO response_model
 
     def _create_route_post(self):
-        self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=Union[self.get, List[self.get]] if self.create_multi else self.get)
+        self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced)
 
     def _create_route_get(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['GET'], endpoint=self._create_endpoint_get(), response_model=self.get)
+        self.__router.add_api_route(self.id_field_placeholder, methods=['GET'], endpoint=self._create_endpoint_get(), response_model=self.get_referenced)
 
     def _create_route_patch(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['PATCH'], endpoint=self._create_endpoint_patch(), response_model=self.get)
+        self.__router.add_api_route(self.id_field_placeholder, methods=['PATCH'], endpoint=self._create_endpoint_patch(), response_model=self.get_referenced)
 
     def _create_route_put(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['PUT'], endpoint=self._create_endpoint_put(), response_model=self.get)
+        self.__router.add_api_route(self.id_field_placeholder, methods=['PUT'], endpoint=self._create_endpoint_put(), response_model=self.get_referenced)
 
     def _create_route_delete(self):
         self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=204)
@@ -189,7 +207,7 @@ class DjangoRouterSchema(RouterSchema):
         return instances
 
     def object_update(self, *, access: Optional[Access] = None, instance: TDjangoModel, data: TUpdateModel, transfer_action: TransferAction) -> TDjangoModel:
-        transfer_to_orm(data, instance, action=transfer_action, access=access)
+        transfer_to_orm(data, instance, action=transfer_action, exclude_unset=transfer_action == TransferAction.NO_SUBOBJECTS, access=access)
 
     def object_delete(self, *, access: Optional[Access] = None, instance: TDjangoModel):
         if self.delete_status:
@@ -233,7 +251,7 @@ class DjangoRouterSchema(RouterSchema):
     def endpoint_list(self, *, access: Optional[Access] = None, pagination: Pagination, search: models.Q = models.Q(), **kwargs):
         ids = self._get_ids(kwargs, include_self=False)
         return self.list(items=[
-            self.get.from_orm(obj)
+            self.get_referenced.from_orm(obj)
             for obj in self.objects_get_filtered(
                 parent_ids=ids,
                 access=access,
@@ -369,9 +387,9 @@ class DjangoRouterSchema(RouterSchema):
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
         obj = self.object_create(access=access, data=data)
         if len(obj) > 1:
-            return [self.get.from_orm(o) for o in obj]
+            return [self.get_referenced.from_orm(o) for o in obj]
 
-        return self.get.from_orm(obj[0])
+        return self.get_referenced.from_orm(obj[0])
 
     def _create_endpoint_post(self):
         create_type = self.create
@@ -390,7 +408,7 @@ class DjangoRouterSchema(RouterSchema):
 
     def endpoint_get(self, *, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
-        return self.get.from_orm(obj)
+        return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_get(self):
         return forge.sign(*[
@@ -401,19 +419,19 @@ class DjangoRouterSchema(RouterSchema):
     def endpoint_patch(self, *, data: TUpdateModel, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
         self.object_update(access=access, instance=obj, data=data, transfer_action=TransferAction.NO_SUBOBJECTS)
-        return self.get.from_orm(obj)
+        return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_patch(self):
         return forge.sign(*[
             *self._path_signature_id(),
-            forge.kwarg('data', type=to_optional()(self.update), default=Body(...)),
+            forge.kwarg('data', type=self.update_optional, default=Body(...)), # TODO to_optional()
             *self._security_signature(Method.PATCH),
         ])(self.endpoint_patch)
 
     def endpoint_put(self, *, data, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
         self.object_update(access=access, instance=obj, data=data, transfer_action=TransferAction.SYNC)
-        return self.get.from_orm(obj)
+        return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_put(self):
         return forge.sign(*[

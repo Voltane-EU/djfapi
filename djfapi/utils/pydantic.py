@@ -26,6 +26,10 @@ def _new_field_from_model_field(
     )
 
 
+class OptionalModel(BaseModel):
+    pass
+
+
 def to_optional(id_key: str = 'id'):
     def wrapped(cls: Type[BaseModel]):
         def optional_model(c, __module__: str, __parent__module__: str):
@@ -48,8 +52,8 @@ def to_optional(id_key: str = 'id'):
                         fields[key] = (field_type, _new_field_from_model_field(field, default, required=False))
 
                     return create_model(
-                        c.__qualname__,
-                        __base__=c,
+                        f'{c.__qualname__} [O]',
+                        __base__=(c, OptionalModel),
                         __module__=c.__module__ if c.__module__ != __parent__module__ else __module__,
                         **fields,
                     )
@@ -62,6 +66,10 @@ def to_optional(id_key: str = 'id'):
         return optional_model(cls, __module__=cls.__module__, __parent__module__=cls.__base__.__module__)
 
     return wrapped
+
+
+class ReferencedModel(BaseModel):
+    pass
 
 
 class Reference(BaseModel):
@@ -131,7 +139,7 @@ def include_reference(reference_key: str = '$rel', reference_params_key: str = '
                     if c not in recreated_models:
                         recreated_models[c] = create_model(
                             f'{c.__qualname__} [R]',
-                            __base__=c,
+                            __base__=(c, ReferencedModel),
                             __module__=c.__module__ if c.__module__ != __parent__module__ else __module__,
                             **fields,
                         )
