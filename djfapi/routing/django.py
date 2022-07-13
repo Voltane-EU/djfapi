@@ -11,6 +11,7 @@ from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
 from ..utils.fastapi_django import AggregationFunction, aggregation
+from ..utils.pydantic import to_optional
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
@@ -179,6 +180,9 @@ class DjangoRouterSchema(RouterSchema):
         instances = []
         for el in data:
             instance: TDjangoModel = self.model()
+            if hasattr(self.model, 'tenant_id') and access:
+                instance.tenant_id = access.tenant_id
+
             transfer_to_orm(el, instance, action=TransferAction.CREATE, access=access)
             instances.append(instance)
 
@@ -402,7 +406,7 @@ class DjangoRouterSchema(RouterSchema):
     def _create_endpoint_patch(self):
         return forge.sign(*[
             *self._path_signature_id(),
-            forge.kwarg('data', type=self.update, default=Body(...)),
+            forge.kwarg('data', type=to_optional()(self.update), default=Body(...)),
             *self._security_signature(Method.PATCH),
         ])(self.endpoint_patch)
 
