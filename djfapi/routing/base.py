@@ -4,6 +4,7 @@ from typing import List, Optional, Sequence, Type, Any, TypeVar, Dict
 from abc import ABC
 from pydantic import BaseModel, root_validator, create_model, Extra
 from fastapi.security.base import SecurityBase
+from ..utils.fastapi import CacheControl
 
 
 TBaseModel = TypeVar('TBaseModel', bound=BaseModel)
@@ -33,6 +34,7 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     parent: Optional[RouterSchema] = None
     security: Optional[SecurityBase] = None
     security_scopes: Optional[Dict[Method, Sequence[str]]] = None
+    cache_control: Optional[CacheControl] = None
 
     def _init_list(self):
         self.list = create_model(f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get], ...))

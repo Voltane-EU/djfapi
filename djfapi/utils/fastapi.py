@@ -1,6 +1,11 @@
 from typing import List, Optional
+from enum import Enum
 from fastapi import Query
 from ..schemas import Pagination
+
+
+class CacheControl(Enum):
+    NO_CACHE = 'no-cache'
 
 
 def depends_pagination(max_limit: Optional[int] = 1000, default_order_by: Optional[List[str]] = None):

@@ -6,8 +6,7 @@ from typing import Any, List, Optional, Type, TypeVar, Union
 import forge
 from pydantic import create_model
 from django.db import models
-from fastapi import APIRouter, Security, Path, Body, Depends, Query
-from fastapi.security.base import SecurityBase
+from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
 from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
@@ -16,7 +15,7 @@ from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, 
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
-from . import BaseRouter, RouterSchema, Method
+from . import RouterSchema, Method
 
 
 TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
@@ -248,6 +247,13 @@ class DjangoRouterSchema(RouterSchema):
     def _get_id(self, kwargs: dict):
         return kwargs[self._path_signature_id()[-1].name]
 
+    def depends_response_headers(self, method: Method, response: Response):
+        if method in (Method.GET, Method.GET_LIST, Method.GET_AGGREGATE):
+            if self.cache_control:
+                response.headers['Cache-Control'] = self.cache_control.value
+
+        return response
+
     def endpoint_list(self, *, access: Optional[Access] = None, pagination: Pagination, search: models.Q = models.Q(), **kwargs):
         ids = self._get_ids(kwargs, include_self=False)
         return self.list(items=[
@@ -349,6 +355,7 @@ class DjangoRouterSchema(RouterSchema):
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_LIST),
             *self._depends_search(),
+            forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
         ])(self.endpoint_list)
 
     def endpoint_aggregate(
@@ -382,6 +389,7 @@ class DjangoRouterSchema(RouterSchema):
             forge.kwarg('field', type=self.aggregate_fields, default=Path(...)),
             forge.kwarg('group_by', type=Optional[List[self.aggregate_group_by]], default=Query(None)) if self.aggregate_group_by else None,
             *self._depends_search(),
+            forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
         ] if arg])(self.endpoint_aggregate)
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
@@ -414,6 +422,7 @@ class DjangoRouterSchema(RouterSchema):
         return forge.sign(*[
             *self._path_signature_id(),
             *self._security_signature(Method.GET),
+            forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
         ])(self.endpoint_get)
 
     def endpoint_patch(self, *, data: TUpdateModel, access: Optional[Access] = None, **kwargs):
