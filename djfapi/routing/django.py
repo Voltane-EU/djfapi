@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date
 from enum import Enum
 from functools import cached_property, partial
-from typing import Any, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, List, Optional, Type, TypeVar, Union
 import forge
 from pydantic import create_model
 from django.db import models
@@ -15,7 +15,7 @@ from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, 
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
-from . import RouterSchema, Method
+from . import RouterSchema, Method, SecurityScopes
 
 
 TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
@@ -217,20 +217,32 @@ class DjangoRouterSchema(RouterSchema):
             instance.delete()
 
     def _get_security_scopes(self, method: Method):
-        if self.security_scopes and self.security_scopes.get(method):
-            return self.security_scopes.get(method)
+        if self.security_scopes and getattr(self.security_scopes, method.value):
+            return getattr(self.security_scopes, method.value)
 
         if self.parent:
+            if method in (Method.POST, Method.PUT, Method.PATCH, Method.DELETE):
+                method = Method.PATCH
+
             return self.parent._get_security_scopes(method)
 
         return None
 
+    def _get_security(self):
+        if self.security:
+            return self.security
+
+        if self.parent:
+            return self.parent._get_security()
+
+        return None
+
     def _security_signature(self, method: Method):
-        if not self.security:
+        if not self._get_security():
             return []
 
         return [
-            forge.kwarg('access', type=Access, default=Security(self.security, scopes=self._get_security_scopes(method))),
+            forge.kwarg('access', type=Access, default=Security(self._get_security(), scopes=[str(scope) for scope in self._get_security_scopes(method) or []])),
         ]
 
     def _path_signature_id(self, include_self=True):
@@ -350,13 +362,26 @@ class DjangoRouterSchema(RouterSchema):
             )),
         ]
 
+    def get_endpoint_description(self, method: Method):
+        description = ""
+
+        scopes = self._get_security_scopes(method)
+        if scopes:
+            description += "Scopes: " + ", ".join([f'`{scope}`' for scope in scopes]) + "\n\n"
+
+        return description or None
+
+    def _add_endpoint_description(self, method: Method, endpoint):
+        endpoint.__doc__ = self.get_endpoint_description(method)
+        return endpoint
+
     def _create_endpoint_list(self):
-        return forge.sign(*[
+        return self._add_endpoint_description(Method.GET_LIST, forge.sign(*[
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_LIST),
             *self._depends_search(),
             forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
-        ])(self.endpoint_list)
+        ])(self.endpoint_list))
 
     def endpoint_aggregate(
         self,
@@ -382,7 +407,7 @@ class DjangoRouterSchema(RouterSchema):
 
 
     def _create_endpoint_aggregate(self):
-        return forge.sign(*[arg for arg in [
+        return self._add_endpoint_description(Method.GET_AGGREGATE, forge.sign(*[arg for arg in [
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_AGGREGATE),
             forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
@@ -390,7 +415,7 @@ class DjangoRouterSchema(RouterSchema):
             forge.kwarg('group_by', type=Optional[List[self.aggregate_group_by]], default=Query(None)) if self.aggregate_group_by else None,
             *self._depends_search(),
             forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
-        ] if arg])(self.endpoint_aggregate)
+        ] if arg])(self.endpoint_aggregate))
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
         obj = self.object_create(access=access, data=data)
@@ -404,11 +429,11 @@ class DjangoRouterSchema(RouterSchema):
         if self.create_multi:
             create_type = List[self.create]
 
-        return forge.sign(*[
+        return self._add_endpoint_description(Method.POST, forge.sign(*[
             *self._path_signature_id(include_self=False),
             forge.kwarg('data', type=create_type, default=Body(...)),
             *self._security_signature(Method.POST),
-        ])(self.endpoint_post)
+        ])(self.endpoint_post))
 
     def _object_get(self, kwargs, access: Optional[Access] = None):
         ids = self._get_ids(kwargs)
@@ -419,11 +444,11 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_get(self):
-        return forge.sign(*[
+        return self._add_endpoint_description(Method.GET, forge.sign(*[
             *self._path_signature_id(),
             *self._security_signature(Method.GET),
             forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
-        ])(self.endpoint_get)
+        ])(self.endpoint_get))
 
     def endpoint_patch(self, *, data: TUpdateModel, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
@@ -431,11 +456,11 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_patch(self):
-        return forge.sign(*[
+        return self._add_endpoint_description(Method.PATCH, forge.sign(*[
             *self._path_signature_id(),
             forge.kwarg('data', type=self.update_optional, default=Body(...)), # TODO to_optional()
             *self._security_signature(Method.PATCH),
-        ])(self.endpoint_patch)
+        ])(self.endpoint_patch))
 
     def endpoint_put(self, *, data, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
@@ -443,11 +468,11 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_put(self):
-        return forge.sign(*[
+        return self._add_endpoint_description(Method.PUT, forge.sign(*[
             *self._path_signature_id(),
             forge.kwarg('data', type=self.update, default=Body(...)),
             *self._security_signature(Method.PUT),
-        ])(self.endpoint_put)
+        ])(self.endpoint_put))
 
     def endpoint_delete(self, *, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
@@ -456,10 +481,10 @@ class DjangoRouterSchema(RouterSchema):
         return ''
 
     def _create_endpoint_delete(self):
-        return forge.sign(*[
+        return self._add_endpoint_description(Method.DELETE, forge.sign(*[
             *self._path_signature_id(),
             *self._security_signature(Method.DELETE),
-        ])(self.endpoint_delete)
+        ])(self.endpoint_delete))
 
     class Config:
         keep_untouched = (cached_property,)

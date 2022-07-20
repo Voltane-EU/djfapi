@@ -2,9 +2,10 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional, Sequence, Type, Any, TypeVar, Dict
 from abc import ABC
-from pydantic import BaseModel, root_validator, create_model, Extra
+from pydantic import BaseModel, root_validator, create_model, Extra, Field
 from fastapi.security.base import SecurityBase
 from ..utils.fastapi import CacheControl
+from ..schemas.access import AccessScope
 
 
 TBaseModel = TypeVar('TBaseModel', bound=BaseModel)
@@ -22,6 +23,39 @@ class Method(Enum):
     DELETE = 'delete'
 
 
+_list = list
+
+
+class SecurityScopes(BaseModel):
+    get: List[AccessScope] = Field(default_factory=_list)
+    list: List[AccessScope] = Field(default_factory=_list)
+    aggregate: List[AccessScope] = Field(default_factory=_list)
+    post: List[AccessScope] = Field(default_factory=_list)
+    patch: List[AccessScope] = Field(default_factory=_list)
+    put: List[AccessScope] = Field(default_factory=_list)
+    delete: List[AccessScope] = Field(default_factory=_list)
+
+    auto: Optional[List[str]]
+
+    @root_validator(pre=True)
+    def transform_scopes(cls, values):
+        for key in ('get', 'list', 'aggregate', 'post', 'patch', 'put', 'delete'):
+            if values.get(key):
+                values[key] = [AccessScope.from_str(scope) if isinstance(scope, str) else scope for scope in values[key]]
+
+        for key in ('list', 'aggregate'):
+            if not values.get(key):
+                values[key] = values['get']
+
+        return values
+
+    def __get__(self):
+        if self.auto:
+            return self
+
+        return self
+
+
 class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     name: str
     list: Optional[Type[BaseModel]] = None
@@ -33,7 +67,7 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     children: List[RouterSchema] = []
     parent: Optional[RouterSchema] = None
     security: Optional[SecurityBase] = None
-    security_scopes: Optional[Dict[Method, Sequence[str]]] = None
+    security_scopes: Optional[SecurityScopes] = None
     cache_control: Optional[CacheControl] = None
 
     def _init_list(self):

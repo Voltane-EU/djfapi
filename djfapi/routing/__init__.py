@@ -1,1 +1,1 @@
-from .base import BaseRouter, RouterSchema, Method
+from .base import BaseRouter, RouterSchema, Method, SecurityScopes
