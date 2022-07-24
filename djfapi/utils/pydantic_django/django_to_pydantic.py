@@ -1,6 +1,7 @@
 import os
 import json
 from typing import Coroutine, Mapping, Optional, Type, Union
+from contextvars import ContextVar
 from django.db.models.query_utils import DeferredAttribute
 from pydantic import BaseModel, parse_obj_as
 from pydantic.fields import ModelField, SHAPE_SINGLETON, SHAPE_LIST
@@ -20,6 +21,9 @@ if os.getenv('USE_ASYNCIO'):
 
 else:
     from ..sync import sync_to_async
+
+
+transfer_current_obj: ContextVar[models.Model] = ContextVar('transfer_current_obj')
 
 
 class Break(Exception):
@@ -302,6 +306,8 @@ def _transfer_from_orm(
     span.set_data('transfer_from_orm.django_obj', django_obj)
     span.set_data('transfer_from_orm.django_parent_obj', django_parent_obj)
     span.set_data('transfer_from_orm.filter_submodel', filter_submodel)
+
+    transfer_current_obj.set(django_obj)
 
     values = {}
     field: ModelField

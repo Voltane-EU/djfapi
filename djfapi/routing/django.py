@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date
 from enum import Enum
 from functools import cached_property, partial
-from typing import Any, Callable, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, List, Dict, Optional, Type, TypeVar, Union
 import forge
 from pydantic import create_model
 from django.db import models
@@ -196,7 +196,7 @@ class DjangoRouterSchema(RouterSchema):
     def object_get_by_id(self, id: str, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None) -> TDjangoModel:
         return self.get_queryset(parent_ids, access).get(id=id)
 
-    def object_create(self, *, access: Optional[Access] = None, data: Union[TCreateModel, List[TCreateModel]]) -> List[TDjangoModel]:
+    def object_create(self, *, access: Optional[Access] = None, data: Union[TCreateModel, List[TCreateModel]], parent_id: Optional[str] = None) -> List[TDjangoModel]:
         if not isinstance(data, list):
             data = [data]
 
@@ -208,6 +208,9 @@ class DjangoRouterSchema(RouterSchema):
             instance: TDjangoModel = self.model()
             if hasattr(self.model, 'tenant_id') and access:
                 instance.tenant_id = access.tenant_id
+
+            if parent_id:
+                setattr(instance, self.parent.id_field, parent_id)
 
             transfer_to_orm(el, instance, action=TransferAction.CREATE, access=access)
             instances.append(instance)
@@ -261,7 +264,7 @@ class DjangoRouterSchema(RouterSchema):
 
         return ids
 
-    def _get_ids(self, kwargs: dict, include_self=True):
+    def _get_ids(self, kwargs: dict, include_self=True) -> List[str]:
         ids = self._path_signature_id(include_self=include_self)
         return [kwargs[arg.name] for arg in ids]
 
@@ -385,11 +388,14 @@ class DjangoRouterSchema(RouterSchema):
         return endpoint
 
     def _create_endpoint_list(self):
+        def depends_response_headers(response: Response):
+            return self.depends_response_headers(method=Method.GET_LIST, response=response)
+
         return self._add_endpoint_description(Method.GET_LIST, forge.sign(*[
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_LIST),
             *self._depends_search(),
-            forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
+            forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
         ])(self.endpoint_list))
 
     def endpoint_aggregate(
@@ -416,6 +422,9 @@ class DjangoRouterSchema(RouterSchema):
 
 
     def _create_endpoint_aggregate(self):
+        def depends_response_headers(response: Response):
+            return self.depends_response_headers(method=Method.GET_LIST, response=response)
+
         return self._add_endpoint_description(Method.GET_AGGREGATE, forge.sign(*[arg for arg in [
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_AGGREGATE),
@@ -423,11 +432,12 @@ class DjangoRouterSchema(RouterSchema):
             forge.kwarg('field', type=self.aggregate_fields, default=Path(...)),
             forge.kwarg('group_by', type=Optional[List[self.aggregate_group_by]], default=Query(None)) if self.aggregate_group_by else None,
             *self._depends_search(),
-            forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
+            forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
         ] if arg])(self.endpoint_aggregate))
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
-        obj = self.object_create(access=access, data=data)
+        ids = self._path_signature_id(include_self=False)
+        obj = self.object_create(access=access, data=data, parent_id=kwargs[self.parent.id_field] if self.parent else None)
         if len(obj) > 1:
             return [self.get_referenced.from_orm(o) for o in obj]
 
@@ -453,10 +463,13 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_get(self):
+        def depends_response_headers(response: Response):
+            return self.depends_response_headers(method=Method.GET_LIST, response=response)
+
         return self._add_endpoint_description(Method.GET, forge.sign(*[
             *self._path_signature_id(),
             *self._security_signature(Method.GET),
-            forge.kwarg('response', type=Response, default=Depends(partial(self.depends_response_headers, method=Method.GET_LIST))),
+            forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
         ])(self.endpoint_get))
 
     def endpoint_patch(self, *, data: TUpdateModel, access: Optional[Access] = None, **kwargs):

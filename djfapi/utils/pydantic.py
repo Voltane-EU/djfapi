@@ -1,3 +1,5 @@
+from functools import cached_property
+from types import FunctionType
 import typing
 from typing import Callable, ForwardRef, Optional, Type, Any
 from pydantic import BaseModel, create_model, Field
@@ -75,7 +77,7 @@ class ReferencedModel(BaseModel):
 class Reference(BaseModel):
     def __init_subclass__(cls, rel: Optional[str] = None, rel_params: Optional[Callable] = None, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
-        cls._rel = rel
+        cls._rel = getattr(cls, '_rel', rel)
         cls._rel_params = rel_params
         c = cls
         while cls._rel is None:
@@ -131,7 +133,17 @@ def include_reference(reference_key: str = '$rel', reference_params_key: str = '
 
                 if issubclass(c, Reference):
                     recreate_model = True
-                    fields['x_reference_key'] = (str, Field(c._rel, example=c._rel, orm_field=None, alias=reference_key))
+                    value = Undefined
+                    value_example = None
+                    value_factory = None
+                    if isinstance(c._rel, FunctionType):
+                        value_factory = c._rel
+                        value_example = c._rel()
+
+                    else:
+                        value = value_example = c._rel
+
+                    fields['x_reference_key'] = (str, Field(value, example=value_example, orm_field=None, alias=reference_key, default_factory=value_factory))
                     if c._rel_params:
                         fields['x_reference_params_key'] = (dict, Field(alias=reference_params_key, orm_method=c._rel_params))
 
