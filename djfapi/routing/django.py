@@ -87,6 +87,15 @@ class DjangoRouterSchema(RouterSchema):
         return Enum(f'{self.model.__name__}Fields', {field: field for field in _get_model_fields(self.model)})
 
     @cached_property
+    def order_fields(self):
+        fields = []
+        for field in self.model_fields:
+            fields.append(field.value)
+            fields.append('-' + field.value)
+
+        return Enum(f'{self.model.__name__}OrderFields', {field: field for field in fields})
+
+    @cached_property
     def get_referenced(self):
         if not issubclass(self.get, ReferencedModel):
             return include_reference()(self.get)
@@ -358,7 +367,7 @@ class DjangoRouterSchema(RouterSchema):
         return [
             forge.kwarg('search', type=models.Q, default=Depends(self.create_depends_search())),
             forge.kwarg('pagination', type=Pagination, default=Depends(
-                forge.modify('order_by', type=Optional[List[self.model_fields]], default=Query(self.pagination_options.get('default_order_by', list())))(depends_pagination(**self.pagination_options))
+                forge.modify('order_by', type=Optional[List[self.order_fields]], default=Query(self.pagination_options.get('default_order_by', list())))(depends_pagination(**self.pagination_options))
             )),
         ]
 
