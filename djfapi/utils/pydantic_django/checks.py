@@ -31,7 +31,7 @@ def check_field_access(input: BaseModel, access: Access):
                     pass
 
             elif key in model.__fields__:
-                scopes = [str(scope) for scope in model.__fields__[key].field_info.extra.get('scopes') if scope.action != 'read']
+                scopes = [str(scope) for scope in model.__fields__[key].field_info.extra.get('scopes', []) if scope.action != 'read']
                 if scopes:
                     if not access.token.has_audience(scopes):
                         raise AccessError(detail=Error(
