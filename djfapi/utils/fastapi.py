@@ -20,7 +20,7 @@ def depends_pagination(max_limit: Optional[int] = 1000, default_order_by: Option
         return Pagination(
             limit=offset + (limit or max_limit),
             offset=offset,
-            order_by=order_by,
+            order_by=[col.value if isinstance(col, Enum) else col for col in order_by],
         )
 
     return get_pagination
