@@ -100,8 +100,8 @@ def transfer_to_orm(
                 populate_default(field.type_, django_obj)
 
             else:
-                if 'orm_field' in field.field_info.extra and field.field_info.extra['orm_field'] is None:
-                    # Do not raise error when orm_field was explicitly set to None
+                if 'orm_field' in field.field_info.extra and field.field_info.extra['orm_field'] is None or field.field_info.extra.get('orm_method'):
+                    # Do not raise error when orm_field was explicitly set to None or orm_method is set
                     continue
 
                 assert orm_field, "orm_field not set on %r of %r" % (field, pydantic_cls)
