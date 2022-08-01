@@ -69,10 +69,6 @@ class DjangoRouterSchema(RouterSchema):
     def model_fields(self):
         def _get_model_fields(model, prefix=''):
             for field in model._meta.get_fields():
-                if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
-                    yield f'{prefix}{field.name}__count', field
-                    continue
-
                 yield f'{prefix}{field.name}', field
 
                 if isinstance(field, models.ForeignKey):
@@ -87,8 +83,12 @@ class DjangoRouterSchema(RouterSchema):
     def order_fields(self):
         fields = []
         for field in self.model_fields:
-            fields.append(field._name_)
-            fields.append('-' + field._name_)
+            name = field._name_
+            if isinstance(field.value, (models.ManyToManyRel, models.ManyToOneRel)):
+                name += '__count'
+
+            fields.append(name)
+            fields.append('-' + name)
 
         return Enum(f'{self.model.__name__}OrderFields', {field: field for field in fields})
 
@@ -117,7 +117,7 @@ class DjangoRouterSchema(RouterSchema):
         fields.update({
             field._name_: field._name_
             for field in self.model_fields
-            if isinstance(field.value, (models.IntegerField, models.FloatField, models.DecimalField))
+            if isinstance(field.value, (models.IntegerField, models.FloatField, models.DecimalField, models.ManyToManyRel, models.ManyToOneRel))
         })
         return Enum(f'{self.model.__name__}AggregateFields', fields)
 
