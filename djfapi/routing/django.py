@@ -326,14 +326,14 @@ class DjangoRouterSchema(RouterSchema):
             field_type = self.model.__annotations__.get(field.name)
             field_name = field.name
 
-            is_exact_search_included = True
             query_options = {
                 'default': None,
             }
 
             if isinstance(field, models.ForeignKey):
-                field_type = str
+                field_type = List[str]
                 field_name += '__id'
+                query_options.update(min_length=field.max_length, max_length=field.max_length)
 
                 if self.parent and field.related_model == self.parent.model:
                     continue
@@ -380,15 +380,13 @@ class DjangoRouterSchema(RouterSchema):
 
             elif isinstance(field, models.CharField):
                 if field.choices:
-                    fields[field].append(forge.kwarg(f'{field_name}__in', type=Optional[List[field_type]], default=Query(**query_options)))
-                    is_exact_search_included = False
+                    field_type = List[field_type]
 
                 else:
                     query_options['max_length'] = field.max_length
                     fields[field].append(forge.kwarg(f'{field_name}__icontains', type=Optional[field_type], default=Query(**query_options)))
 
-            if is_exact_search_included:
-                fields[field].insert(0, forge.kwarg(field_name, type=Optional[field_type], default=Query(**query_options)))
+            fields[field].insert(0, forge.kwarg(field_name, type=Optional[field_type], default=Query(**query_options)))
 
         return [x for xs in fields.values() for x in xs]
 
