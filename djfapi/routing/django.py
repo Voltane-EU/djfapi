@@ -7,6 +7,7 @@ import forge
 from pydantic import create_model, constr
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
+from starlette.status import HTTP_204_NO_CONTENT
 from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
@@ -189,7 +190,7 @@ class DjangoRouterSchema(RouterSchema):
         self.__router.add_api_route(self.id_field_placeholder, methods=['PUT'], endpoint=self._create_endpoint_put(), response_model=self.get_referenced)
 
     def _create_route_delete(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=204)
+        self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=HTTP_204_NO_CONTENT)
 
     def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, is_annotated: bool = False):
         if self.parent:
@@ -315,7 +316,11 @@ class DjangoRouterSchema(RouterSchema):
         ])
 
     def search_filter(self, **kwargs) -> models.Q:
-        return models.Q(**remove_none(kwargs))
+        q = models.Q(**remove_none(kwargs))
+        if self.delete_status and 'status__in' in kwargs and kwargs['status__in'] is None:
+            q &= ~models.Q(status=self.delete_status)
+
+        return q
 
     def search_filter_fields(self):
         fields = defaultdict(list)
@@ -381,7 +386,10 @@ class DjangoRouterSchema(RouterSchema):
 
             elif isinstance(field, models.CharField):
                 if field.choices:
-                    query_options.update(alias=field_name)
+                    query_options['alias'] = field_name
+                    if field_name == 'status' and self.delete_status:
+                        query_options['description'] = f"When not set, objects with status {self.delete_status} are excluded"
+
                     field_name += '__in'
                     field_type = List[field_type]
 
@@ -530,7 +538,7 @@ class DjangoRouterSchema(RouterSchema):
         obj = self._object_get(kwargs, access=access)
         self.object_delete(access=access, instance=obj)
 
-        return ''
+        return Response(status_code=HTTP_204_NO_CONTENT)
 
     def _create_endpoint_delete(self):
         return self._add_endpoint_description(Method.DELETE, forge.sign(*[
