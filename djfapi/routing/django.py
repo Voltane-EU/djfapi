@@ -15,7 +15,7 @@ from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, 
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
-from . import RouterSchema, Method
+from . import RouterSchema, Method, SecurityScopes  # noqa  # import SecurityScopes for user friendly import
 
 
 TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
