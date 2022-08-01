@@ -345,7 +345,7 @@ class DjangoRouterSchema(RouterSchema):
                     continue
 
             if field.null:
-                fields[field].append(forge.kwarg(f'{field_name}__isnull', type=Optional[bool], default=Query(**{**query_options, 'alias': None})))
+                fields[field].append(forge.kwarg(f'{query_options.get("alias") or field_name}__isnull', type=Optional[bool], default=Query(**{**query_options, 'alias': None})))
 
             if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
                 field_name += '__count'
