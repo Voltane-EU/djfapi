@@ -4,7 +4,8 @@ from enum import Enum
 from functools import cached_property, partial
 from typing import Any, Callable, List, Dict, Optional, Type, TypeVar, Union
 import forge
-from pydantic import create_model
+from pydantic import create_model, Field
+from pydantic.fields import Undefined, UndefinedType
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
 from ..schemas import Access, Error
@@ -67,31 +68,27 @@ class DjangoRouterSchema(RouterSchema):
     @cached_property
     def model_fields(self):
         def _get_model_fields(model, prefix=''):
-            fields = []
             for field in model._meta.get_fields():
                 if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
-                    fields.append(f'{prefix}{field.name}__count')
+                    yield f'{prefix}{field.name}__count', field
                     continue
+
+                yield f'{prefix}{field.name}', field
 
                 if isinstance(field, models.ForeignKey):
                     if self.parent and field.related_model == self.parent.model:
                         continue
 
-                    fields += _get_model_fields(field.related_model, prefix=prefix + field.name + '__')
-                    continue
+                    yield from _get_model_fields(field.related_model, prefix=prefix + field.name + '__')
 
-                fields.append(f'{prefix}{field.name}')
-
-            return fields
-
-        return Enum(f'{self.model.__name__}Fields', {field: field for field in _get_model_fields(self.model)})
+        return Enum(f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)})
 
     @cached_property
     def order_fields(self):
         fields = []
         for field in self.model_fields:
-            fields.append(field.value)
-            fields.append('-' + field.value)
+            fields.append(field._name_)
+            fields.append('-' + field._name_)
 
         return Enum(f'{self.model.__name__}OrderFields', {field: field for field in fields})
 
@@ -108,6 +105,34 @@ class DjangoRouterSchema(RouterSchema):
             return to_optional()(self.update)
 
         return self.update
+
+    @cached_property
+    def get_aggregate_fields(self) -> Enum:
+        if self.aggregate_fields:
+            return self.aggregate_fields
+
+        fields = {
+            '_count': '*',
+        }
+        fields.update({
+            field._name_: field._name_
+            for field in self.model_fields
+            if isinstance(field.value, (models.IntegerField, models.FloatField, models.DecimalField))
+        })
+        return Enum(f'{self.model.__name__}AggregateFields', fields)
+
+    @cached_property
+    def get_aggregate_group_by(self) -> Enum:
+        if self.aggregate_group_by:
+            return self.aggregate_group_by
+
+        return Enum(f'{self.model.__name__}GroupByFields', {
+            field._name_: field._name_
+            for field in self.model_fields
+            if (
+                isinstance(field.value, (models.CharField)) and field.value.choices
+            ) or isinstance(field.value, models.ForeignKey)
+        })
 
     @property
     def router(self) -> APIRouter:
@@ -126,7 +151,7 @@ class DjangoRouterSchema(RouterSchema):
         if self.list and self.list is not ...:
             self._create_route_list()
 
-        if self.aggregate_fields:
+        if self.aggregate_fields is not ...:
             self._create_route_aggregate()
 
         if self.create and self.create is not ...:
@@ -429,8 +454,8 @@ class DjangoRouterSchema(RouterSchema):
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_AGGREGATE),
             forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
-            forge.kwarg('field', type=self.aggregate_fields, default=Path(...)),
-            forge.kwarg('group_by', type=Optional[List[self.aggregate_group_by]], default=Query(None)) if self.aggregate_group_by else None,
+            forge.kwarg('field', type=self.get_aggregate_fields, default=Path(...)),
+            forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None)) if self.aggregate_group_by is not ... else None,
             *self._depends_search(),
             forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
         ] if arg])(self.endpoint_aggregate))
