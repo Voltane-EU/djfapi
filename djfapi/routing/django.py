@@ -4,7 +4,7 @@ from enum import Enum
 from functools import cached_property
 from typing import Any, List, Optional, Type, TypeVar, Union
 import forge
-from pydantic import create_model, Field
+from pydantic import create_model, constr
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
 from ..schemas import Access, Error
@@ -331,9 +331,9 @@ class DjangoRouterSchema(RouterSchema):
             }
 
             if isinstance(field, models.ForeignKey):
-                field_type = List[str]
+                field_type = List[constr(min_length=field.max_length, max_length=field.max_length)]
                 field_name += '__id'
-                query_options.update(alias=field_name, min_length=field.max_length, max_length=field.max_length)
+                query_options.update(alias=field_name)
                 field_name += '__in'
 
                 if self.parent and field.related_model == self.parent.model:
