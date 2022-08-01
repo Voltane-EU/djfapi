@@ -1,3 +1,4 @@
+from decimal import Decimal
 import os
 import json
 from typing import Coroutine, Mapping, Optional, Type, Union
@@ -5,6 +6,7 @@ from contextvars import ContextVar
 from django.db.models.query_utils import DeferredAttribute
 from pydantic import BaseModel, parse_obj_as
 from pydantic.fields import ModelField, SHAPE_SINGLETON, SHAPE_LIST
+from pydantic.types import ConstrainedStr
 from django.db import models
 from django.db.models.manager import Manager
 from django.db.models.fields.related_descriptors import ManyToManyDescriptor, ReverseManyToOneDescriptor
@@ -232,8 +234,19 @@ def _transfer_field_singleton(
         else:
             read_scopes = [str(scope) for scope in scopes if scope.action == 'read']
             if read_scopes:
+                _value = None
+                if not field.allow_none:
+                    if issubclass(field.type_, str):
+                        _value = '•' * (field.type_.max_length if issubclass(field.type_, ConstrainedStr) else len(value))
+
+                    elif issubclass(field.type_, (int, float, Decimal)):
+                        _value = 0
+
+                    else:
+                        raise NotImplementedError
+
                 if not access.token.has_audience(read_scopes):
-                    value = None
+                    value = _value
 
                 else:
                     if hasattr(django_obj, 'check_access'):
@@ -245,7 +258,7 @@ def _transfer_field_singleton(
                                 django_obj.check_access(access, selector=scope.selector)
 
                             except AccessError:
-                                value = None
+                                value = _value
 
     return value
 
