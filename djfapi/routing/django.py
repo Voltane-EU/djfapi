@@ -1,11 +1,10 @@
 from collections import defaultdict
 from datetime import date
 from enum import Enum
-from functools import cached_property, partial
-from typing import Any, Callable, List, Dict, Optional, Type, TypeVar, Union
+from functools import cached_property
+from typing import Any, List, Optional, Type, TypeVar, Union
 import forge
 from pydantic import create_model, Field
-from pydantic.fields import Undefined, UndefinedType
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
 from ..schemas import Access, Error
@@ -16,7 +15,7 @@ from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, 
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
-from . import RouterSchema, Method, SecurityScopes
+from . import RouterSchema, Method
 
 
 TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
@@ -327,26 +326,31 @@ class DjangoRouterSchema(RouterSchema):
             field_type = self.model.__annotations__.get(field.name)
             field_name = field.name
 
+            is_exact_search_included = True
+            query_options = {
+                'default': None,
+            }
+
             if isinstance(field, models.ForeignKey):
                 field_type = str
                 field_name += '__id'
 
                 if self.parent and field.related_model == self.parent.model:
                     continue
-            
-            if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
-                continue
 
-            is_exact_search_included = True
-            query_options = {
-                'default': None,
-            }
+            if field.null:
+                fields[field].append(forge.kwarg(f'{field_name}__isnull', type=Optional[bool], default=Query(**query_options)))
+
+            if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
+                field_name += '__count'
 
             if isinstance(field, (
                 models.DateField,
                 models.DateTimeField,
                 models.IntegerField,
                 models.DecimalField,
+                models.ManyToManyRel,
+                models.ManyToOneRel,
             )):
                 variations = [(field_name, field_type)]
 
