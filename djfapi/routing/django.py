@@ -333,7 +333,8 @@ class DjangoRouterSchema(RouterSchema):
             if isinstance(field, models.ForeignKey):
                 field_type = List[str]
                 field_name += '__id'
-                query_options.update(min_length=field.max_length, max_length=field.max_length)
+                query_options.update(alias=field_name, min_length=field.max_length, max_length=field.max_length)
+                field_name += '__in'
 
                 if self.parent and field.related_model == self.parent.model:
                     continue
@@ -380,6 +381,8 @@ class DjangoRouterSchema(RouterSchema):
 
             elif isinstance(field, models.CharField):
                 if field.choices:
+                    query_options.update(alias=field_name)
+                    field_name += '__in'
                     field_type = List[field_type]
 
                 else:
