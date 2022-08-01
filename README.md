@@ -74,16 +74,6 @@ from djfapi.routing.django import DjangoRouterSchema, SecurityScopes
 transaction_token = JWTToken(scheme_name="Transaction Token")
 
 
-class CompanyAggregateField(Enum):
-    count = '*'
-    employees = 'employees'
-
-
-class CompanyAggregateGroupBy(Enum):
-    employees__department = 'employees__department'
-    employees__costcenter = 'employees__costcenter'
-
-
 def company_objects_filter(access: Access) -> Q:
     q = Q(tenant_id=access.tenant_id)
     if access.scope.selector != 'any':
@@ -106,8 +96,6 @@ router = DjangoRouterSchema(
         put=['business.companies.update.any', 'business.companies.update.own',],
         delete=['business.companies.delete.any', 'business.companies.delete.own',],
     ),
-    aggregate_fields=CompanyAggregateField,
-    aggregate_group_by=CompanyAggregateGroupBy,
     objects_filter=company_objects_filter,
     children=[
         DjangoRouterSchema(
@@ -116,7 +104,6 @@ router = DjangoRouterSchema(
             get=schemas.response.CompanyDepartment,
             create=schemas.request.CompanyDepartmentCreate,
             update=schemas.request.CompanyDepartmentUpdate,
-            security=transaction_token,
             children=[
                 DjangoRouterSchema(
                     name='teams',
@@ -124,7 +111,6 @@ router = DjangoRouterSchema(
                     get=schemas.response.CompanyDepartmentTeam,
                     create=schemas.request.CompanyDepartmentTeamCreate,
                     update=schemas.request.CompanyDepartmentTeamUpdate,
-                    security=transaction_token,
                 ),
             ]
         ),
@@ -134,7 +120,6 @@ router = DjangoRouterSchema(
             get=schemas.response.CompanyCostcenter,
             create=schemas.request.CompanyCostcenterCreate,
             update=schemas.request.CompanyCostcenterUpdate,
-            security=transaction_token,
         ),
     ]
 )
