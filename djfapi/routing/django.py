@@ -192,17 +192,24 @@ class DjangoRouterSchema(RouterSchema):
     def _create_route_delete(self):
         self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=HTTP_204_NO_CONTENT)
 
-    def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, is_annotated: bool = False, is_aggregated: bool = False):
+    def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, pagination: Optional[Pagination] = None, is_annotated: bool = False, is_aggregated: bool = False):
+        objects = self.model.objects
         if self.parent:
-            return getattr(self.parent.get_queryset(parent_ids[:-1], access, is_annotated).get(pk=parent_ids[-1]), self.related_name_on_parent).filter(self.objects_filter(access))
+            parent_objects = self.parent.get_queryset(parent_ids[:-1], access, is_annotated=False, is_aggregated=False)
+            parent = parent_objects.get(pk=parent_ids[-1])
+            objects = getattr(parent, self.related_name_on_parent)
 
-        queryset = self.model.objects.filter(self.objects_filter(access))
+        queryset = objects.filter(self.objects_filter(access))
         if is_annotated:
             queryset = queryset.annotate(*[models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel))])
 
         # cockroachdb returns multiple rows when searching on related fields, therefore perform a distinct on the primary key
         if not is_aggregated:
-            return queryset.distinct('pk')
+            distinct_fields = ['pk']
+            if pagination:
+                distinct_fields += pagination.order_by
+
+            return queryset.distinct(*distinct_fields)
 
         return queryset
 
@@ -220,7 +227,7 @@ class DjangoRouterSchema(RouterSchema):
         search: models.Q = models.Q(),
         pagination: Pagination,
     ) -> List[TDjangoModel]:
-        return list(pagination.query(self.get_queryset(parent_ids, access).filter(search)))
+        return list(pagination.query(self.get_queryset(parent_ids, access, pagination=pagination).filter(search)))
 
     def object_get_by_id(self, id: str, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None) -> TDjangoModel:
         return self.get_queryset(parent_ids, access).get(id=id)
