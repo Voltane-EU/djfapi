@@ -207,7 +207,7 @@ class DjangoRouterSchema(RouterSchema):
         if not is_aggregated:
             distinct_fields = ['pk']
             if pagination:
-                distinct_fields += pagination.order_by
+                distinct_fields += [field.removeprefix('-') for field in pagination.order_by]
 
             return queryset.distinct(*distinct_fields)
 
