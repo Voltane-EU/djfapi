@@ -200,7 +200,8 @@ class DjangoRouterSchema(RouterSchema):
         if is_annotated:
             queryset = queryset.annotate(*[models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel))])
 
-        return queryset
+        # cockroachdb returns multiple rows when searching on related fields, therefore perform a distinct on the primary key
+        return queryset.distinct('pk')
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         if hasattr(self.model, 'tenant_id'):
