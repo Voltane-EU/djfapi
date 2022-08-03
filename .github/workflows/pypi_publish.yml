@@ -3,6 +3,9 @@ name: PyPi Release
 # https://help.github.com/en/actions/reference/events-that-trigger-workflows
 on:
   # Only trigger on release creation
+  push:
+    tags:
+      - '*'
   release:
     types:
       - created
