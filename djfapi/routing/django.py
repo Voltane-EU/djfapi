@@ -11,7 +11,7 @@ from starlette.status import HTTP_204_NO_CONTENT
 from ..schemas import Access, Error
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.pydantic_django import transfer_to_orm, TransferAction
-from ..utils.fastapi_django import AggregationFunction, aggregation
+from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse
 from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
 from ..utils.dict import remove_none
 from ..exceptions import ValidationError
@@ -175,7 +175,7 @@ class DjangoRouterSchema(RouterSchema):
         self.__router.add_api_route('', methods=['GET'], endpoint=self._create_endpoint_list(), response_model=self.list)
 
     def _create_route_aggregate(self):
-        self.__router.add_api_route('/aggregate/{aggregation_function}/{field}', methods=['GET'], endpoint=self._create_endpoint_aggregate())  # TODO response_model
+        self.__router.add_api_route('/aggregate/{aggregation_function}/{field}', methods=['GET'], endpoint=self._create_endpoint_aggregate(), response_model=AggregateResponse)
 
     def _create_route_post(self):
         self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced)
@@ -192,7 +192,7 @@ class DjangoRouterSchema(RouterSchema):
     def _create_route_delete(self):
         self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=HTTP_204_NO_CONTENT)
 
-    def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, is_annotated: bool = False):
+    def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, is_annotated: bool = False, is_aggregated: bool = False):
         if self.parent:
             return getattr(self.parent.get_queryset(parent_ids[:-1], access, is_annotated).get(pk=parent_ids[-1]), self.related_name_on_parent).filter(self.objects_filter(access))
 
@@ -201,7 +201,10 @@ class DjangoRouterSchema(RouterSchema):
             queryset = queryset.annotate(*[models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel))])
 
         # cockroachdb returns multiple rows when searching on related fields, therefore perform a distinct on the primary key
-        return queryset.distinct('pk')
+        if not is_aggregated:
+            return queryset.distinct('pk')
+
+        return queryset
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         if hasattr(self.model, 'tenant_id'):
@@ -451,7 +454,7 @@ class DjangoRouterSchema(RouterSchema):
         ids = self._get_ids(kwargs, include_self=False)
 
         return aggregation(
-            self.get_queryset(ids, access, is_annotated=True),
+            self.get_queryset(ids, access, is_annotated=True, is_aggregated=True),
             q_filters=search,
             aggregation_function=aggregation_function,
             field=field,

@@ -1,6 +1,8 @@
+from decimal import Decimal
 from typing import List, Optional, Union
 from enum import Enum
 from psycopg2 import errorcodes as psycopg2_error_codes
+from pydantic import BaseModel, Extra
 from pydantic.error_wrappers import ErrorWrapper
 from django.db.models import Q, QuerySet, Manager, aggregates
 from django.db.utils import ProgrammingError
@@ -14,6 +16,13 @@ class AggregationFunction(Enum):
     max = 'max'
     min = 'min'
     sum = 'sum'
+
+
+class AggregateResponse(BaseModel):
+    class Value(BaseModel, extra=Extra.allow):
+        value: Union[int, float, Decimal]
+
+    values: List[Value]
 
 
 def aggregation(
