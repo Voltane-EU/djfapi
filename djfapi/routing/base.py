@@ -5,7 +5,7 @@ from abc import ABC
 from pydantic import BaseModel, root_validator, create_model, Extra, Field
 from fastapi.security.base import SecurityBase
 from ..utils.fastapi import CacheControl
-from ..schemas.access import AccessScope
+from djdantic.schemas.access import AccessScope
 
 
 TBaseModel = TypeVar('TBaseModel', bound=BaseModel)

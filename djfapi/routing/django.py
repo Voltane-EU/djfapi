@@ -8,12 +8,12 @@ from pydantic import create_model, constr
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
 from starlette.status import HTTP_204_NO_CONTENT
-from ..schemas import Access, Error
+from djdantic.schemas import Access, Error
+from djdantic.utils.pydantic_django import transfer_to_orm, TransferAction
+from djdantic.utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
+from djdantic.utils.dict import remove_none
 from ..utils.fastapi import Pagination, depends_pagination
-from ..utils.pydantic_django import transfer_to_orm, TransferAction
 from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse
-from ..utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
-from ..utils.dict import remove_none
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
 from . import RouterSchema, Method, SecurityScopes  # noqa  # import SecurityScopes for user friendly import

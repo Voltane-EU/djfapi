@@ -1,25 +1,13 @@
-from typing import List, Optional, Tuple
-from contextvars import ContextVar
+from typing import Optional
 from jose import jwt
 from fastapi import HTTPException
 from fastapi.security import SecurityScopes
 from fastapi.security.api_key import APIKeyHeader
 from starlette.requests import Request
-from ..schemas import Error, Access, AccessToken, AccessScope
+from djdantic import context
+from djdantic.schemas import Error, Access, AccessToken, AccessScope
+from sentry_tools import set_user, set_extra
 from ..exceptions import AuthError
-
-try:
-    from sentry_sdk import set_user, set_extra
-
-except ImportError:
-    def set_user(data):
-        pass
-
-    def set_extra(key, data):
-        pass
-
-
-access: ContextVar[Access] = ContextVar('access')
 
 
 class JWTToken(APIKeyHeader):
@@ -82,6 +70,6 @@ class JWTToken(APIKeyHeader):
             current_access.scope = aud_scopes[0]
             set_extra('access.scopes', aud_scopes)
 
-        access.set(current_access)
+        context.access.set(current_access)
 
         return current_access

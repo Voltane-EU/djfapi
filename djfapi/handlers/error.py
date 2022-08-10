@@ -9,6 +9,8 @@ from starlette.exceptions import HTTPException
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.utils import IntegrityError, OperationalError, InternalError
 from django.db.models import RestrictedError, ProtectedError
+from djdantic.schemas import Error
+from djdantic.exceptions import AccessError
 
 try:
     import sentry_sdk
@@ -16,8 +18,6 @@ try:
 
 except ImportError:
     sentry_sdk = None
-
-from .. import schemas
 
 
 _logger = logging.getLogger(__name__)
@@ -52,12 +52,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     content = exc.detail
 
     if isinstance(content, str):
-        content = schemas.Error(
+        content = Error(
             type=exc.__class__.__name__,
             message=content,
         )
 
-    if isinstance(content, schemas.Error) and not content.type:
+    if isinstance(content, Error) and not content.type:
         content.type = exc.__class__.__name__
 
     return await respond_details(
@@ -72,7 +72,7 @@ async def object_does_not_exist_handler(request: Request, exc: ObjectDoesNotExis
     capture_exception(exc)
     return await respond_details(
         request,
-        schemas.Error(
+        Error(
             type=exc.__class__.__name__,
             message=str(exc),
             code=f'not_exist:{exc.__class__.__qualname__.split(".")[0].lower()}',
@@ -100,7 +100,7 @@ async def integrity_error_handler(request: Request, exc: IntegrityError):
 
     return await respond_details(
         request,
-        schemas.Error(
+        Error(
             type=exc.__class__.__name__,
             code=code,
         ),
@@ -114,7 +114,7 @@ async def jose_error_handler(request: Request, exc: JOSEError):
 
     return await respond_details(
         request,
-        schemas.Error(
+        Error(
             type=exc.__class__.__name__,
             message=str(exc),
         ),
@@ -124,9 +124,20 @@ async def jose_error_handler(request: Request, exc: JOSEError):
 
 async def generic_exception_handler(request: Request, exc: Exception):
     if isinstance(exc, NotImplementedError):
-        return await respond_details(request, schemas.Error(type='InternalServerError'), status_code=501)
+        return await respond_details(request, Error(type='InternalServerError'), status_code=501)
 
     if isinstance(exc, (InternalError, OperationalError)):
-        return await respond_details(request, schemas.Error(type=exc.__class__.__name__), status_code=503)
+        return await respond_details(request, Error(type=exc.__class__.__name__), status_code=503)
 
-    return await respond_details(request, schemas.Error(type='InternalServerError'))
+    if isinstance(exc, AccessError):
+        content = exc.detail
+        if not content.type:
+            content.type = exc.__class__.__name__
+
+        return await respond_details(
+            request,
+            content,
+            status_code=403,
+        )
+
+    return await respond_details(request, Error(type='InternalServerError'))
