@@ -1,16 +1,14 @@
 from starlette.types import Message
-from sentry_sdk.integrations.asgi import SentryAsgiMiddleware as BaseSentryAsgiMiddleware
 from sentry_sdk import Hub
 
 
-class SentryAsgiMiddleware(BaseSentryAsgiMiddleware):
-    def event_processor(self, event, hint, asgi_scope):
-        if event.get('type') != 'transaction':
-            asgi_scope['sentry_event_id'] = event['event_id']
+class SentryAsgiMiddleware:
+    __slots__ = ('app',)
 
-        return super().event_processor(event, hint, asgi_scope)
+    def __init__(self, app):
+        self.app = app
 
-    async def _run_asgi3(self, scope, receive, send):
+    async def __call__(self, scope, receive, send):
         async def _send(message: Message):
             try:
                 message.get('headers', list()).append(
@@ -22,5 +20,4 @@ class SentryAsgiMiddleware(BaseSentryAsgiMiddleware):
 
             await send(message)
 
-        return await self._run_app(scope, lambda: self.app(scope, receive, _send))
-
+        return await self.app(scope, receive, _send)
