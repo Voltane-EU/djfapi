@@ -2,16 +2,19 @@ from collections import defaultdict
 from datetime import date
 from enum import Enum
 from functools import cached_property
-from typing import Any, List, Optional, Type, TypeVar, Union
+from typing import Any, List, Optional, Tuple, Type, TypeVar, Union
 import forge
 from pydantic import create_model, constr
+from pydantic.fields import Undefined, UndefinedType
 from django.db import models
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
+from fastapi.security.base import SecurityBase
 from starlette.status import HTTP_204_NO_CONTENT
 from djdantic.schemas import Access, Error
 from djdantic.utils.pydantic_django import transfer_to_orm, TransferAction
 from djdantic.utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
 from djdantic.utils.dict import remove_none
+from djdantic.schemas.access import AccessScope
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse
 from ..exceptions import ValidationError
@@ -28,11 +31,11 @@ class DjangoRouterSchema(RouterSchema):
     parent: Optional['DjangoRouterSchema'] = None
     model: Type[TDjangoModel]
     get: Type[TBaseModel]
-    create: Type[TCreateModel] = None
-    update: Type[TUpdateModel] = None
+    create: Union[Type[TCreateModel], UndefinedType] = None
+    update: Union[Type[TUpdateModel], UndefinedType] = None
     delete_status: Optional[Any] = None
     pagination_options: dict = {}
-    aggregate_fields: Optional[Type[Enum]] = None
+    aggregate_fields: Optional[Union[Type[Enum], UndefinedType]] = None
     aggregate_group_by: Optional[Type[Enum]] = None
 
     def __init__(self, **data: Any) -> None:
@@ -148,19 +151,19 @@ class DjangoRouterSchema(RouterSchema):
 
         self.__router = APIRouter(prefix=prefix)
 
-        if self.list and self.list is not ...:
+        if self.list and self.list is not Undefined:
             self._create_route_list()
 
-        if self.aggregate_fields is not ...:
+        if self.aggregate_fields is not Undefined:
             self._create_route_aggregate()
 
-        if self.create and self.create is not ...:
+        if self.create and self.create is not Undefined:
             self._create_route_post()
 
-        if self.get and self.get is not ...:
+        if self.get and self.get is not Undefined and self.get_endpoint:
             self._create_route_get()
 
-        if self.update and self.update is not ...:
+        if self.update and self.update is not Undefined:
             self._create_route_patch()
             self._create_route_put()
 
@@ -264,7 +267,7 @@ class DjangoRouterSchema(RouterSchema):
         else:
             instance.delete()
 
-    def _get_security_scopes(self, method: Method):
+    def _get_security_scopes(self, method: Method) -> Optional[List[AccessScope]]:
         if self.security_scopes and getattr(self.security_scopes, method.value):
             return getattr(self.security_scopes, method.value)
 
@@ -276,21 +279,26 @@ class DjangoRouterSchema(RouterSchema):
 
         return None
 
-    def _get_security(self):
+    def _get_security(self, method: Method) -> Tuple[Optional[SecurityBase], Optional[List[AccessScope]]]:
+        scopes = self._get_security_scopes(method)
+        if not scopes:
+            return None, None
+
         if self.security:
-            return self.security
+            return self.security, scopes
 
         if self.parent:
-            return self.parent._get_security()
+            return self.parent._get_security(method)[0], scopes
 
-        return None
+        return None, None
 
     def _security_signature(self, method: Method):
-        if not self._get_security():
+        security, scopes = self._get_security(method)
+        if not security:
             return []
 
         return [
-            forge.kwarg('access', type=Access, default=Security(self._get_security(), scopes=[str(scope) for scope in self._get_security_scopes(method) or []])),
+            forge.kwarg('access', type=Access, default=Security(security, scopes=[str(scope) for scope in scopes or []])),
         ]
 
     def _path_signature_id(self, include_self=True):

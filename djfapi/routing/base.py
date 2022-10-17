@@ -1,8 +1,9 @@
 from __future__ import annotations
 from enum import Enum
-from typing import List, Optional, Sequence, Type, Any, TypeVar, Dict
+from typing import List, Optional, Sequence, Type, Any, TypeVar, Dict, Union
 from abc import ABC
 from pydantic import BaseModel, root_validator, create_model, Extra, Field
+from pydantic.fields import UndefinedType
 from fastapi.security.base import SecurityBase
 from ..utils.fastapi import CacheControl
 from djdantic.schemas.access import AccessScope
@@ -27,13 +28,13 @@ _list = list
 
 
 class SecurityScopes(BaseModel):
-    get: List[AccessScope] = Field(default_factory=_list)
-    list: List[AccessScope] = Field(default_factory=_list)
-    aggregate: List[AccessScope] = Field(default_factory=_list)
-    post: List[AccessScope] = Field(default_factory=_list)
-    patch: List[AccessScope] = Field(default_factory=_list)
-    put: List[AccessScope] = Field(default_factory=_list)
-    delete: List[AccessScope] = Field(default_factory=_list)
+    get: Optional[List[AccessScope]] = Field(default_factory=_list)
+    list: Optional[List[AccessScope]] = Field(default_factory=_list)
+    aggregate: Optional[List[AccessScope]] = Field(default_factory=_list)
+    post: Optional[List[AccessScope]] = Field(default_factory=_list)
+    patch: Optional[List[AccessScope]] = Field(default_factory=_list)
+    put: Optional[List[AccessScope]] = Field(default_factory=_list)
+    delete: Optional[List[AccessScope]] = Field(default_factory=_list)
 
     auto: Optional[List[str]]
 
@@ -58,11 +59,12 @@ class SecurityScopes(BaseModel):
 
 class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     name: str
-    list: Optional[Type[BaseModel]] = None
+    list: Optional[Union[Type[BaseModel], UndefinedType]] = None
     get: Type[TBaseModel]
-    create: Optional[Type[TCreateModel]] = None
+    get_endpoint: bool = True
+    create: Optional[Union[Type[TCreateModel], UndefinedType]] = None
     create_multi: bool = False
-    update: Optional[Type[TUpdateModel]] = None
+    update: Optional[Union[Type[TUpdateModel], UndefinedType]] = None
     delete: bool = True
     children: List[RouterSchema] = []
     parent: Optional[RouterSchema] = None
