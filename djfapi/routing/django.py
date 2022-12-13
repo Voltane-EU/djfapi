@@ -78,6 +78,9 @@ class DjangoRouterSchema(RouterSchema):
                     if self.parent and field.related_model == self.parent.model:
                         continue
 
+                    if field.related_model is model:
+                        continue
+
                     yield from _get_model_fields(field.related_model, prefix=prefix + field.name + '__')
 
         return Enum(f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)})
