@@ -132,12 +132,20 @@ class DjangoRouterSchema(RouterSchema):
         if self.aggregate_group_by:
             return self.aggregate_group_by
 
+        def generate_group_by_fields():
+            for field in self.model_fields:
+                if isinstance(field.value, models.CharField) and field.value.choices:
+                    yield field._name_
+
+                if isinstance(field.value, models.ForeignKey):
+                    yield field._name_
+
+                if isinstance(field.value, (models.DateField, models.DateTimeField)):
+                    for field_name, _field_type in self._get_field_variations(field.value):
+                        yield field_name
+
         return Enum(f'{self.model.__name__}GroupByFields', {
-            field._name_: field._name_
-            for field in self.model_fields
-            if (
-                isinstance(field.value, (models.CharField)) and field.value.choices
-            ) or isinstance(field.value, models.ForeignKey)
+            field_name: field_name for field_name in generate_group_by_fields()
         })
 
     @property
@@ -344,6 +352,28 @@ class DjangoRouterSchema(RouterSchema):
 
         return q
 
+    def _get_field_variations(self, field: models.Field, field_name: str = None, field_type=None):
+        field_type = field_type or self.model.__annotations__.get(field.name)
+        field_name = field_name or field.name
+        variations = [(field_name, field_type)]
+
+        if isinstance(field, models.DateTimeField):
+            variations.append((f'{field_name}__date', date))
+
+        if isinstance(field, (models.DateField, models.DateTimeField)):
+            for variation, type_ in [*variations]:
+                if type_ not in (date, Optional[date]):
+                    continue
+
+                variations.append((f'{variation}__year', int))
+                variations.append((f'{variation}__quarter', int))
+                variations.append((f'{variation}__month', int))
+                variations.append((f'{variation}__day', int))
+                variations.append((f'{variation}__week', int))
+                variations.append((f'{variation}__week_day', int))
+
+        return variations
+
     def search_filter_fields(self):
         fields = defaultdict(list)
         for field in self.model._meta.get_fields():
@@ -380,22 +410,7 @@ class DjangoRouterSchema(RouterSchema):
                 models.ManyToManyRel,
                 models.ManyToOneRel,
             )):
-                variations = [(field_name, field_type)]
-
-                if isinstance(field, models.DateTimeField):
-                    variations.append((f'{field_name}__date', date))
-
-                if isinstance(field, (models.DateField, models.DateTimeField)):
-                    for variation, type_ in [*variations]:
-                        if type_ != date:
-                            continue
-
-                        variations.append((f'{variation}__year', int))
-                        variations.append((f'{variation}__quarter', int))
-                        variations.append((f'{variation}__month', int))
-                        variations.append((f'{variation}__day', int))
-                        variations.append((f'{variation}__week', int))
-                        variations.append((f'{variation}__week_day', int))
+                variations = self._get_field_variations(field, field_name, field_type)
 
                 for variation in variations:
                     name = variation
