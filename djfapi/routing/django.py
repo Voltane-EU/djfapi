@@ -1,12 +1,12 @@
 from collections import defaultdict
 from datetime import date
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, wraps
 from typing import Any, List, Optional, Tuple, Type, TypeVar, Union
 import forge
 from pydantic import create_model, constr
 from pydantic.fields import Undefined, UndefinedType
-from django.db import models
+from django.db import models, connections
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
 from fastapi.security.base import SecurityBase
 from starlette.status import HTTP_204_NO_CONTENT
@@ -217,9 +217,12 @@ class DjangoRouterSchema(RouterSchema):
         if is_annotated:
             queryset = queryset.annotate(*[models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel))])
 
-        # cockroachdb returns multiple rows when searching on related fields, therefore perform a distinct on the primary key
         if not is_aggregated:
-            distinct_fields = ['pk']
+            distinct_fields = []
+            if connections.databases[queryset.db]['ENGINE'] == 'django_cockroachdb':
+                # cockroachdb returns multiple rows when searching on related fields, therefore perform a distinct on the primary key
+                distinct_fields += ['pk']
+
             if pagination:
                 distinct_fields += [field.removeprefix('-') for field in pagination.order_by]
 
@@ -458,19 +461,21 @@ class DjangoRouterSchema(RouterSchema):
 
         return description or None
 
-    def _add_endpoint_description(self, method: Method, endpoint):
+    def _wrap_endpoint(self, method: Method, endpoint):
         endpoint.__doc__ = self.get_endpoint_description(method)
-        return endpoint
+        @wraps(endpoint)
+        def wrapped(*args, response: Response, **kwargs):
+            self.depends_response_headers(method=method, response=response)
+            return endpoint(*args, response=response, **kwargs)
+
+        return wrapped
 
     def _create_endpoint_list(self):
-        def depends_response_headers(response: Response):
-            return self.depends_response_headers(method=Method.GET_LIST, response=response)
-
-        return self._add_endpoint_description(Method.GET_LIST, forge.sign(*[
+        return self._wrap_endpoint(Method.GET_LIST, forge.sign(*[
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_LIST),
             *self._depends_search(),
-            forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
+            forge.kwarg('response', type=Response),
         ])(self.endpoint_list))
 
     def endpoint_aggregate(
@@ -497,17 +502,14 @@ class DjangoRouterSchema(RouterSchema):
 
 
     def _create_endpoint_aggregate(self):
-        def depends_response_headers(response: Response):
-            return self.depends_response_headers(method=Method.GET_LIST, response=response)
-
-        return self._add_endpoint_description(Method.GET_AGGREGATE, forge.sign(*[arg for arg in [
+        return self._wrap_endpoint(Method.GET_AGGREGATE, forge.sign(*[arg for arg in [
             *self._path_signature_id(include_self=False),
             *self._security_signature(Method.GET_AGGREGATE),
             forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
             forge.kwarg('field', type=self.get_aggregate_fields, default=Path(...)),
             forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None)) if self.aggregate_group_by is not ... else None,
             *self._depends_search(),
-            forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
+            forge.kwarg('response', type=Response),
         ] if arg])(self.endpoint_aggregate))
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
@@ -523,7 +525,7 @@ class DjangoRouterSchema(RouterSchema):
         if self.create_multi:
             create_type = List[self.create]
 
-        return self._add_endpoint_description(Method.POST, forge.sign(*[
+        return self._wrap_endpoint(Method.POST, forge.sign(*[
             *self._path_signature_id(include_self=False),
             forge.kwarg('data', type=create_type, default=Body(...)),
             *self._security_signature(Method.POST),
@@ -538,13 +540,10 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_get(self):
-        def depends_response_headers(response: Response):
-            return self.depends_response_headers(method=Method.GET_LIST, response=response)
-
-        return self._add_endpoint_description(Method.GET, forge.sign(*[
+        return self._wrap_endpoint(Method.GET, forge.sign(*[
             *self._path_signature_id(),
             *self._security_signature(Method.GET),
-            forge.kwarg('response', type=Response, default=Depends(depends_response_headers)),
+            forge.kwarg('response', type=Response),
         ])(self.endpoint_get))
 
     def endpoint_patch(self, *, data: TUpdateModel, access: Optional[Access] = None, **kwargs):
@@ -553,7 +552,7 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_patch(self):
-        return self._add_endpoint_description(Method.PATCH, forge.sign(*[
+        return self._wrap_endpoint(Method.PATCH, forge.sign(*[
             *self._path_signature_id(),
             forge.kwarg('data', type=self.update_optional, default=Body(...)), # TODO to_optional()
             *self._security_signature(Method.PATCH),
@@ -565,7 +564,7 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_put(self):
-        return self._add_endpoint_description(Method.PUT, forge.sign(*[
+        return self._wrap_endpoint(Method.PUT, forge.sign(*[
             *self._path_signature_id(),
             forge.kwarg('data', type=self.update, default=Body(...)),
             *self._security_signature(Method.PUT),
@@ -578,7 +577,7 @@ class DjangoRouterSchema(RouterSchema):
         return Response(status_code=HTTP_204_NO_CONTENT)
 
     def _create_endpoint_delete(self):
-        return self._add_endpoint_description(Method.DELETE, forge.sign(*[
+        return self._wrap_endpoint(Method.DELETE, forge.sign(*[
             *self._path_signature_id(),
             *self._security_signature(Method.DELETE),
         ])(self.endpoint_delete))
