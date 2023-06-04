@@ -19,6 +19,7 @@ from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse
 from ..exceptions import ValidationError
 from .base import TBaseModel, TCreateModel, TUpdateModel
+from .registry import register_router
 from . import RouterSchema, Method, SecurityScopes  # noqa  # import SecurityScopes for user friendly import
 
 
@@ -37,6 +38,7 @@ class DjangoRouterSchema(RouterSchema):
     pagination_options: dict = {}
     aggregate_fields: Optional[Union[Type[Enum], UndefinedType]] = None
     aggregate_group_by: Optional[Type[Enum]] = None
+    register_router: Optional[Tuple[list, dict]] = None
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
@@ -44,6 +46,9 @@ class DjangoRouterSchema(RouterSchema):
         if self.create_multi:
             # create_multi is WIP
             raise NotImplementedError("create_multi is not supported for DjangoRouterSchema")
+
+        if self.register_router:
+            self._create_router()
 
     def _init_list(self):
         self.list = create_model(f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get_referenced], ...))
@@ -184,6 +189,9 @@ class DjangoRouterSchema(RouterSchema):
         child: DjangoRouterSchema
         for child in self.children:
             self.__router.include_router(child.router)
+
+        if self.register_router:
+            register_router(self.__router, *self.register_router[0], **self.register_router[1])
 
     def _create_route_list(self):
         self.__router.add_api_route('', methods=['GET'], endpoint=self._create_endpoint_list(), response_model=self.list)
