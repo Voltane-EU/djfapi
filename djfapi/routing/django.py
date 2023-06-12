@@ -398,7 +398,7 @@ class DjangoRouterSchema(RouterSchema):
                 'default': None,
             }
 
-            if isinstance(field, models.ForeignKey):
+            if isinstance(field, (models.ForeignKey, models.ManyToManyField)):
                 field_type = List[constr(min_length=field.max_length, max_length=field.max_length)]
                 field_name += '__id'
                 query_options.update(alias=field_name)
@@ -406,6 +406,9 @@ class DjangoRouterSchema(RouterSchema):
 
                 if self.parent and field.related_model == self.parent.model:
                     continue
+
+            if isinstance(field, models.ManyToManyField):
+                continue
 
             if field.null:
                 fields[field].append(forge.kwarg(f'{query_options.get("alias") or field_name}__isnull', type=Optional[bool], default=Query(**{**query_options, 'alias': None})))
