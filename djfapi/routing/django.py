@@ -7,7 +7,7 @@ import forge
 from pydantic import create_model, constr
 from pydantic.fields import Undefined, UndefinedType
 from django.db import models, connections
-from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response
+from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response, Request
 from fastapi.security.base import SecurityBase
 from starlette.status import HTTP_204_NO_CONTENT
 from djdantic.schemas import Access, Error
@@ -27,7 +27,7 @@ TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
 
 
 class DjangoRouterSchema(RouterSchema):
-    __router = None
+    __router: APIRouter = None
 
     parent: Optional['DjangoRouterSchema'] = None
     model: Type[TDjangoModel]
@@ -75,18 +75,24 @@ class DjangoRouterSchema(RouterSchema):
 
     @cached_property
     def model_fields(self):
-        def _get_model_fields(model, prefix=''):
-            for field in model._meta.get_fields():
+        def _get_model_fields(model, prefix='', recursion_tree=None):
+            if recursion_tree is None:
+                recursion_tree = []
+
+            for field in model._meta.get_fields(include_parents=False):
                 yield f'{prefix}{field.name}', field
 
-                if isinstance(field, models.ForeignKey):
+                if isinstance(field, (models.ForeignKey, models.ManyToManyField, models.ManyToOneRel, models.ManyToManyRel)):
                     if self.parent and field.related_model == self.parent.model:
                         continue
 
                     if field.related_model is model:
                         continue
 
-                    yield from _get_model_fields(field.related_model, prefix=prefix + field.name + '__')
+                    if field.related_model in recursion_tree:
+                        continue
+
+                    yield from _get_model_fields(field.related_model, prefix=prefix + field.name + '__', recursion_tree=[*recursion_tree, model])
 
         return Enum(f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)})
 
@@ -118,7 +124,7 @@ class DjangoRouterSchema(RouterSchema):
         return self.update
 
     @cached_property
-    def get_aggregate_fields(self) -> Enum:
+    def aggregated_fields(self) -> Enum:
         if self.aggregate_fields:
             return self.aggregate_fields
 
@@ -194,25 +200,67 @@ class DjangoRouterSchema(RouterSchema):
             register_router(self.__router, *self.register_router[0], **self.register_router[1])
 
     def _create_route_list(self):
-        self.__router.add_api_route('', methods=['GET'], endpoint=self._create_endpoint_list(), response_model=self.list)
+        self.__router.add_api_route(
+            '',
+            methods=['GET'],
+            endpoint=self._create_endpoint_list(),
+            response_model=self.list,
+            summary=f'{self.model.__name__} list',
+        )
 
     def _create_route_aggregate(self):
-        self.__router.add_api_route('/aggregate/{aggregation_function}/{field}', methods=['GET'], endpoint=self._create_endpoint_aggregate(), response_model=AggregateResponse)
+        self.__router.add_api_route(
+            '/aggregate/{aggregation_function}/{field}',
+            methods=['GET'],
+            endpoint=self._create_endpoint_aggregate(),
+            response_model=AggregateResponse,
+            summary=f'{self.model.__name__} aggregate',
+        )
 
     def _create_route_post(self):
-        self.__router.add_api_route('', methods=['POST'], endpoint=self._create_endpoint_post(), response_model=Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced)
+        self.__router.add_api_route(
+            '',
+            methods=['POST'],
+            endpoint=self._create_endpoint_post(),
+            response_model=Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced,
+            summary=f'{self.model.__name__} create',
+        )
 
     def _create_route_get(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['GET'], endpoint=self._create_endpoint_get(), response_model=self.get_referenced)
+        self.__router.add_api_route(
+            self.id_field_placeholder,
+            methods=['GET'],
+            endpoint=self._create_endpoint_get(),
+            response_model=self.get_referenced,
+            summary=f'{self.model.__name__} read',
+        )
 
     def _create_route_patch(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['PATCH'], endpoint=self._create_endpoint_patch(), response_model=self.get_referenced)
+        self.__router.add_api_route(
+            self.id_field_placeholder,
+            methods=['PATCH'],
+            endpoint=self._create_endpoint_patch(),
+            response_model=self.get_referenced,
+            summary=f'{self.model.__name__} update (partial)',
+        )
 
     def _create_route_put(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['PUT'], endpoint=self._create_endpoint_put(), response_model=self.get_referenced)
+        self.__router.add_api_route(
+            self.id_field_placeholder,
+            methods=['PUT'],
+            endpoint=self._create_endpoint_put(),
+            response_model=self.get_referenced,
+            summary=f'{self.model.__name__} update',
+        )
 
     def _create_route_delete(self):
-        self.__router.add_api_route(self.id_field_placeholder, methods=['DELETE'], endpoint=self._create_endpoint_delete(), status_code=HTTP_204_NO_CONTENT)
+        self.__router.add_api_route(
+            self.id_field_placeholder,
+            methods=['DELETE'],
+            endpoint=self._create_endpoint_delete(),
+            status_code=HTTP_204_NO_CONTENT,
+            summary=f'{self.model.__name__} delete',
+        )
 
     def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, pagination: Optional[Pagination] = None, is_annotated: bool = False, is_aggregated: bool = False):
         objects = self.model.objects
@@ -222,8 +270,22 @@ class DjangoRouterSchema(RouterSchema):
             objects = getattr(parent, self.related_name_on_parent)
 
         queryset = objects.filter(self.objects_filter(access))
+
+        # queryset = queryset.filter(self.apply_filters())
+
         if is_annotated:
-            queryset = queryset.annotate(*[models.Count(field.name) for field in self.model._meta.get_fields() if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel))])
+            def _generate_annotations():
+                for field in self.model_fields:
+                    if isinstance(field.value, (models.IntegerField, models.FloatField, models.DecimalField)):
+                        yield models.Sum(field.name)
+                        yield models.Avg(field.name)
+                        yield models.Min(field.name)
+                        yield models.Max(field.name)
+
+                    if isinstance(field.value, models.ManyToManyField):
+                        yield models.Count(field.name)
+
+            queryset = queryset.annotate(*_generate_annotations())
 
         if not is_aggregated:
             distinct_fields = []
@@ -239,6 +301,7 @@ class DjangoRouterSchema(RouterSchema):
         return queryset
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
+        """ Security filtering """
         if hasattr(self.model, 'tenant_id'):
             return models.Q(tenant_id=access.tenant_id)
 
@@ -317,27 +380,21 @@ class DjangoRouterSchema(RouterSchema):
     def _security_signature(self, method: Method):
         security, scopes = self._get_security(method)
         if not security:
-            return []
+            return
 
-        return [
-            forge.kwarg('access', type=Access, default=Security(security, scopes=[str(scope) for scope in scopes or []])),
-        ]
+        yield forge.kwarg('access', type=Access, default=Security(security, scopes=[str(scope) for scope in scopes or []])),
 
     def _path_signature_id(self, include_self=True):
-        ids = self.parent._path_signature_id() if self.parent else []
-        if include_self:
-            ids.append(forge.kwarg(self.id_field, type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length)))
+        if self.parent:
+            yield from self.parent._path_signature_id()
 
-        return ids
+        if include_self:
+            yield forge.kwarg(self.id_field, type=str, default=Path(..., min_length=self.model.id.field.max_length, max_length=self.model.id.field.max_length))
 
     def _get_ids(self, kwargs: dict, include_self=True) -> List[str]:
-        ids = self._path_signature_id(include_self=include_self)
-        return [kwargs[arg.name] for arg in ids]
+        return [kwargs[arg.name] for arg in self._path_signature_id(include_self=include_self)]
 
-    def _get_id(self, kwargs: dict):
-        return kwargs[self._path_signature_id()[-1].name]
-
-    def depends_response_headers(self, method: Method, response: Response):
+    def depends_response_headers(self, method: Method, request: Request, response: Response):
         if method in (Method.GET, Method.GET_LIST, Method.GET_AGGREGATE):
             if self.cache_control:
                 response.headers['Cache-Control'] = self.cache_control.value
@@ -383,16 +440,28 @@ class DjangoRouterSchema(RouterSchema):
                 variations.append((f'{variation}__week', int))
                 variations.append((f'{variation}__week_day', int))
 
+        if isinstance(field, (models.IntegerField, models.FloatField, models.DecimalField)):
+            variations.append((f'{field_name}__sum', field_type))
+            variations.append((f'{field_name}__avg', float if isinstance(field, models.IntegerField) else field_type))
+            variations.append((f'{field_name}__min', field_type))
+            variations.append((f'{field_name}__max', field_type))
+
         return variations
 
-    def search_filter_fields(self):
+    def search_filter_fields(self) -> List[forge.FParameter]:
         fields = defaultdict(list)
-        for field in self.model._meta.get_fields():
+        for mfield in self.model_fields:
+            field: models.Field = mfield.value
             if getattr(field, 'primary_key', False) or field.name == 'tenant_id':
                 continue
 
-            field_type = self.model.__annotations__.get(field.name)
-            field_name = field.name
+            field_type = field.model.__annotations__.get(field.name)
+            field_name = mfield._name_
+
+            assert isinstance(field, (
+                models.ManyToManyRel,
+                models.ManyToOneRel,
+            )) or field_type, f'Field {field.name} on model {self.model} is missing a type annotation'
 
             query_options = {
                 'default': None,
@@ -420,13 +489,12 @@ class DjangoRouterSchema(RouterSchema):
                 models.DateField,
                 models.DateTimeField,
                 models.IntegerField,
+                models.FloatField,
                 models.DecimalField,
                 models.ManyToManyRel,
                 models.ManyToOneRel,
             )):
-                variations = self._get_field_variations(field, field_name, field_type)
-
-                for variation in variations:
+                for variation in self._get_field_variations(field, field_name, field_type):
                     name = variation
                     type_ = field_type
                     if isinstance(variation, tuple):
@@ -448,7 +516,7 @@ class DjangoRouterSchema(RouterSchema):
                     query_options['max_length'] = field.max_length
                     fields[field].append(forge.kwarg(f'{field_name}__icontains', type=Optional[field_type], default=Query(**query_options)))
 
-            fields[field].insert(0, forge.kwarg(field_name, type=Optional[field_type], default=Query(**query_options)))
+            fields[field].insert(0, forge.kwarg(f'{field_name}', type=Optional[field_type], default=Query(**query_options)))
 
         return [x for xs in fields.values() for x in xs]
 
@@ -456,12 +524,10 @@ class DjangoRouterSchema(RouterSchema):
         return forge.sign(*self.search_filter_fields())(self.search_filter)
 
     def _depends_search(self):
-        return [
-            forge.kwarg('search', type=models.Q, default=Depends(self.create_depends_search())),
-            forge.kwarg('pagination', type=Pagination, default=Depends(
-                forge.modify('order_by', type=Optional[List[self.order_fields]], default=Query(self.pagination_options.get('default_order_by', list())))(depends_pagination(**self.pagination_options))
-            )),
-        ]
+        yield forge.kwarg('search', type=models.Q, default=Depends(self.create_depends_search()))
+        yield forge.kwarg('pagination', type=Pagination, default=Depends(
+            forge.modify('order_by', type=Optional[List[self.order_fields]], default=Query(self.pagination_options.get('default_order_by', list())))(depends_pagination(**self.pagination_options))
+        ))
 
     def get_endpoint_description(self, method: Method):
         description = ""
@@ -472,22 +538,42 @@ class DjangoRouterSchema(RouterSchema):
 
         return description or None
 
-    def _wrap_endpoint(self, method: Method, endpoint):
-        endpoint.__doc__ = self.get_endpoint_description(method)
-        @wraps(endpoint)
-        def wrapped(*args, response: Response, **kwargs):
-            self.depends_response_headers(method=method, response=response)
-            return endpoint(*args, response=response, **kwargs)
+    def signature(self, method: Method):
+        yield forge.kwarg('request', type=Request)
+        yield forge.kwarg('response', type=Response)
 
-        return wrapped
+        yield from self._path_signature_id(include_self=method not in (Method.GET_LIST, Method.GET_AGGREGATE, Method.POST))
+        yield from self._security_signature(method)
+
+        if method in (Method.GET_LIST, Method.GET_AGGREGATE):
+            yield from self._depends_search()
+
+    def endpoint(self, method: Method, signature: Optional[List] = None):
+        """
+        Decorates an endpoint method and applies shared signatures
+        """
+        if not signature:
+            signature = []
+
+        def wrapper(endpoint):
+            try:
+                endpoint = forge.sign(*[*self.signature(method), *signature])(endpoint)
+
+            except Exception:
+                raise
+
+            endpoint.__doc__ = self.get_endpoint_description(method)
+            @wraps(endpoint)
+            def wrapped(*args, request: Request, response: Response, **kwargs):
+                self.depends_response_headers(method=method, request=request, response=response)
+                return endpoint(*args, request=request, response=response, **kwargs)
+
+            return wrapped
+
+        return wrapper
 
     def _create_endpoint_list(self):
-        return self._wrap_endpoint(Method.GET_LIST, forge.sign(*[
-            *self._path_signature_id(include_self=False),
-            *self._security_signature(Method.GET_LIST),
-            *self._depends_search(),
-            forge.kwarg('response', type=Response),
-        ])(self.endpoint_list))
+        return self.endpoint(Method.GET_LIST)(self.endpoint_list)
 
     def endpoint_aggregate(
         self,
@@ -513,18 +599,13 @@ class DjangoRouterSchema(RouterSchema):
 
 
     def _create_endpoint_aggregate(self):
-        return self._wrap_endpoint(Method.GET_AGGREGATE, forge.sign(*[arg for arg in [
-            *self._path_signature_id(include_self=False),
-            *self._security_signature(Method.GET_AGGREGATE),
+        return self.endpoint(Method.GET_AGGREGATE, signature=[
             forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
-            forge.kwarg('field', type=self.get_aggregate_fields, default=Path(...)),
+            forge.kwarg('field', type=self.aggregated_fields, default=Path(...)),
             forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None)) if self.aggregate_group_by is not ... else None,
-            *self._depends_search(),
-            forge.kwarg('response', type=Response),
-        ] if arg])(self.endpoint_aggregate))
+        ])(self.endpoint_aggregate)
 
     def endpoint_post(self, *, data: TCreateModel, access: Optional[Access] = None, **kwargs):
-        ids = self._path_signature_id(include_self=False)
         obj = self.object_create(access=access, data=data, parent_id=kwargs[self.parent.id_field] if self.parent else None)
         if len(obj) > 1:
             return [self.get_referenced.from_orm(o) for o in obj]
@@ -536,11 +617,7 @@ class DjangoRouterSchema(RouterSchema):
         if self.create_multi:
             create_type = List[self.create]
 
-        return self._wrap_endpoint(Method.POST, forge.sign(*[
-            *self._path_signature_id(include_self=False),
-            forge.kwarg('data', type=create_type, default=Body(...)),
-            *self._security_signature(Method.POST),
-        ])(self.endpoint_post))
+        return self.endpoint(Method.POST, signature=[forge.kwarg('data', type=create_type, default=Body(...))])(self.endpoint_post)
 
     def _object_get(self, kwargs, access: Optional[Access] = None):
         ids = self._get_ids(kwargs)
@@ -551,11 +628,7 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_get(self):
-        return self._wrap_endpoint(Method.GET, forge.sign(*[
-            *self._path_signature_id(),
-            *self._security_signature(Method.GET),
-            forge.kwarg('response', type=Response),
-        ])(self.endpoint_get))
+        return self.endpoint(Method.GET)(self.endpoint_get)
 
     def endpoint_patch(self, *, data: TUpdateModel, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
@@ -563,11 +636,9 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_patch(self):
-        return self._wrap_endpoint(Method.PATCH, forge.sign(*[
-            *self._path_signature_id(),
-            forge.kwarg('data', type=self.update_optional, default=Body(...)), # TODO to_optional()
-            *self._security_signature(Method.PATCH),
-        ])(self.endpoint_patch))
+        return self.endpoint(Method.PATCH, signature=[
+            forge.kwarg('data', type=self.update_optional, default=Body(...)),
+        ])(self.endpoint_patch)
 
     def endpoint_put(self, *, data, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
@@ -575,11 +646,9 @@ class DjangoRouterSchema(RouterSchema):
         return self.get_referenced.from_orm(obj)
 
     def _create_endpoint_put(self):
-        return self._wrap_endpoint(Method.PUT, forge.sign(*[
-            *self._path_signature_id(),
+        return self.endpoint(Method.PUT, signature=[
             forge.kwarg('data', type=self.update, default=Body(...)),
-            *self._security_signature(Method.PUT),
-        ])(self.endpoint_put))
+        ])(self.endpoint_put)
 
     def endpoint_delete(self, *, access: Optional[Access] = None, **kwargs):
         obj = self._object_get(kwargs, access=access)
@@ -588,10 +657,7 @@ class DjangoRouterSchema(RouterSchema):
         return Response(status_code=HTTP_204_NO_CONTENT)
 
     def _create_endpoint_delete(self):
-        return self._wrap_endpoint(Method.DELETE, forge.sign(*[
-            *self._path_signature_id(),
-            *self._security_signature(Method.DELETE),
-        ])(self.endpoint_delete))
+        return self.endpoint(Method.DELETE)(self.endpoint_delete)
 
     class Config:
         keep_untouched = (cached_property,)
