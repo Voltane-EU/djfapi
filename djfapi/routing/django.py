@@ -13,6 +13,7 @@ from starlette.status import HTTP_204_NO_CONTENT
 from djdantic.schemas import Access, Error
 from djdantic.utils.pydantic_django import transfer_to_orm, TransferAction
 from djdantic.utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
+from djdantic.utils.typing import get_field_type
 from djdantic.utils.dict import remove_none
 from djdantic.schemas.access import AccessScope
 from ..utils.fastapi import Pagination, depends_pagination
@@ -421,7 +422,7 @@ class DjangoRouterSchema(RouterSchema):
         return q
 
     def _get_field_variations(self, field: models.Field, field_name: str = None, field_type=None):
-        field_type = field_type or self.model.__annotations__.get(field.name)
+        field_type = field_type or get_field_type(field)
         field_name = field_name or field.name
         variations = [(field_name, field_type)]
 
@@ -455,7 +456,7 @@ class DjangoRouterSchema(RouterSchema):
             if getattr(field, 'primary_key', False) or field.name == 'tenant_id':
                 continue
 
-            field_type = field.model.__annotations__.get(field.name)
+            field_type = get_field_type(field)
             field_name = mfield._name_
 
             assert isinstance(field, (
