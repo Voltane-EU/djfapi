@@ -383,7 +383,7 @@ class DjangoRouterSchema(RouterSchema):
         if not security:
             return
 
-        yield forge.kwarg('access', type=Access, default=Security(security, scopes=[str(scope) for scope in scopes or []])),
+        yield forge.kwarg('access', type=Access, default=Security(security, scopes=[str(scope) for scope in scopes or []]))
 
     def _path_signature_id(self, include_self=True):
         if self.parent:
