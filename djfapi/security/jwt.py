@@ -1,9 +1,10 @@
-from typing import Optional
+from typing import Optional, Union, List
 from jose import jwt
 from fastapi import HTTPException
 from fastapi.security import SecurityScopes
 from fastapi.security.api_key import APIKeyHeader
 from starlette.requests import Request
+from django.conf import settings
 from djdantic import context
 from djdantic.schemas import Error, Access, AccessToken, AccessScope
 from sentry_tools import set_user, set_extra
@@ -12,11 +13,18 @@ from ..exceptions import AuthError
 
 class JWTToken(APIKeyHeader):
     def __init__(
-        self, *, name: str = 'Authorization', scheme_name: Optional[str] = None, auto_error: bool = True, key: str, algorithm: str, issuer: Optional[str] = None,
+        self,
+        *,
+        name: str = 'Authorization',
+        scheme_name: Optional[str] = None,
+        auto_error: bool = True,
+        key: Optional[str] = None,
+        issuer: Optional[str] = None,
+        algorithm: Union[str, List[str]] = 'ES512',
     ):
-        self.key = key
-        self.algorithms = [algorithm]
-        self.issuer = issuer
+        self.key = key or settings.JWT_PUBLIC_KEY
+        self.issuer = issuer or settings.JWT_ISSUER
+        self.algorithms = [algorithm] if isinstance(algorithm, str) else algorithm
 
         super().__init__(name=name, scheme_name=scheme_name, auto_error=auto_error)
 
