@@ -19,6 +19,7 @@ from djdantic.schemas.access import AccessScope
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse
 from ..exceptions import ValidationError
+from ..schemas import errors as error_schemas
 from .base import TBaseModel, TCreateModel, TUpdateModel
 from .registry import register_router
 from . import RouterSchema, Method, SecurityScopes  # noqa  # import SecurityScopes for user friendly import
@@ -200,6 +201,20 @@ class DjangoRouterSchema(RouterSchema):
         if self.register_router:
             register_router(self.__router, *self.register_router[0], **self.register_router[1])
 
+    def _additional_responses(self, method: Method):
+        responses = {}
+        if method in (Method.GET, Method.PATCH, Method.PUT, Method.DELETE) or self.parent:
+            responses[404] = {'description': "ObjectDoesNotExist", 'model': error_schemas.ObjectDoesNotExist}
+
+        if method in (Method.POST, Method.PATCH, Method.PUT, Method.DELETE):
+            responses[420] = {'description': "IntegrityError", 'model': error_schemas.IntegrityError}
+
+        if self.security:
+            responses[401] = {'description': "Unauthorized", 'model': error_schemas.JOSEError}
+            responses[403] = {'description': "AccessError", 'model': error_schemas.AccessError}
+
+        return responses
+
     def _create_route_list(self):
         self.__router.add_api_route(
             '',
@@ -207,6 +222,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_list(),
             response_model=self.list,
             summary=f'{self.model.__name__} list',
+            responses=self._additional_responses(Method.GET_LIST),
         )
 
     def _create_route_aggregate(self):
@@ -216,6 +232,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_aggregate(),
             response_model=AggregateResponse,
             summary=f'{self.model.__name__} aggregate',
+            responses=self._additional_responses(Method.GET_AGGREGATE),
         )
 
     def _create_route_post(self):
@@ -225,6 +242,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_post(),
             response_model=Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced,
             summary=f'{self.model.__name__} create',
+            responses=self._additional_responses(Method.POST),
         )
 
     def _create_route_get(self):
@@ -234,6 +252,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_get(),
             response_model=self.get_referenced,
             summary=f'{self.model.__name__} read',
+            responses=self._additional_responses(Method.GET),
         )
 
     def _create_route_patch(self):
@@ -243,6 +262,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_patch(),
             response_model=self.get_referenced,
             summary=f'{self.model.__name__} update (partial)',
+            responses=self._additional_responses(Method.PATCH),
         )
 
     def _create_route_put(self):
@@ -252,6 +272,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_put(),
             response_model=self.get_referenced,
             summary=f'{self.model.__name__} update',
+            responses=self._additional_responses(Method.PUT),
         )
 
     def _create_route_delete(self):
@@ -261,6 +282,7 @@ class DjangoRouterSchema(RouterSchema):
             endpoint=self._create_endpoint_delete(),
             status_code=HTTP_204_NO_CONTENT,
             summary=f'{self.model.__name__} delete',
+            responses=self._additional_responses(Method.DELETE),
         )
 
     def get_queryset(self, parent_ids: Optional[List[str]] = None, access: Optional[Access] = None, pagination: Optional[Pagination] = None, is_annotated: bool = False, is_aggregated: bool = False):
