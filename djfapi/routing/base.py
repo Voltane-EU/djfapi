@@ -9,19 +9,19 @@ from ..utils.fastapi import CacheControl
 from djdantic.schemas.access import AccessScope
 
 
-TBaseModel = TypeVar('TBaseModel', bound=BaseModel)
-TCreateModel = TypeVar('TCreateModel', bound=BaseModel)
-TUpdateModel = TypeVar('TUpdateModel', bound=BaseModel)
+TBaseModel = TypeVar("TBaseModel", bound=BaseModel)
+TCreateModel = TypeVar("TCreateModel", bound=BaseModel)
+TUpdateModel = TypeVar("TUpdateModel", bound=BaseModel)
 
 
 class Method(Enum):
-    GET_LIST = 'list'
-    GET_AGGREGATE = 'aggregate'
-    GET = 'get'
-    POST = 'post'
-    PATCH = 'patch'
-    PUT = 'put'
-    DELETE = 'delete'
+    GET_LIST = "list"
+    GET_AGGREGATE = "aggregate"
+    GET = "get"
+    POST = "post"
+    PATCH = "patch"
+    PUT = "put"
+    DELETE = "delete"
 
 
 _list = list
@@ -40,13 +40,17 @@ class SecurityScopes(BaseModel):
 
     @root_validator(pre=True)
     def transform_scopes(cls, values):
-        for key in ('get', 'list', 'aggregate', 'post', 'patch', 'put', 'delete'):
+        for key in ("get", "list", "aggregate", "post", "patch", "put", "delete"):
             if values.get(key):
-                values[key] = [AccessScope.from_str(scope) if isinstance(scope, str) else scope for scope in values[key]]
+                values[key] = [
+                    AccessScope.from_str(scope) if isinstance(scope, str) else scope
+                    for scope in values[key]
+                ]
 
-        for key in ('list', 'aggregate'):
-            if not values.get(key):
-                values[key] = values['get']
+        if values.get("get"):
+            for key in ("list", "aggregate"):
+                if not values.get(key):
+                    values[key] = values["get"]
 
         return values
 
@@ -73,7 +77,11 @@ class RouterSchema(BaseModel, arbitrary_types_allowed=True, extra=Extra.allow):
     cache_control: Optional[CacheControl] = None
 
     def _init_list(self):
-        self.list = create_model(f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get], ...))
+        self.list = create_model(
+            f"{self.get.__qualname__}List",
+            __module__=self.get.__module__,
+            items=(List[self.get], ...),
+        )
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
