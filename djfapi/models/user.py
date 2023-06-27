@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, Set, List
 from datetime import timedelta
 from jose import jwt
 from django.utils.crypto import get_random_string
@@ -54,14 +54,24 @@ class AbstractUserTokenMixin(models.Model):
 
         return token, token_id
 
-    def create_transaction_token(self, include_critical: bool = False, used_token: Optional[Access] = None) -> str:
-        audiences: List[str] = [scope.code for scope in self.get_scopes(include_critical=include_critical)]
+    class Meta:
+        abstract = True
 
-        if self.status == self.Status.TERMINATED:
-            raise AuthError(detail=Error(code='user_terminated'))
+
+class AbstractUserRefreshTokenMixin(AbstractUserTokenMixin):
+    class Meta:
+        abstract = True
+
+
+class AbstractUserTransactionTokenMixin(AbstractUserTokenMixin):
+    def get_scopes(self, include_critical: bool = False) -> Set[str]:
+        return []
+
+    def create_transaction_token(self, include_critical: bool = False, used_token: Optional[Access] = None) -> str:
+        audiences: List[str] = list(self.get_scopes(include_critical=include_critical))
 
         if used_token:
-            self.validate_user_token(used_token)
+            self._get_user_token(used_token.jti)
 
         token, _ = self._create_token(
             validity=timedelta(minutes=5),
@@ -74,11 +84,10 @@ class AbstractUserTokenMixin(models.Model):
     def create_user_token(self) -> str:
         token, token_id = self._create_token(
             validity=timedelta(days=365),
-            audiences=['obtain_transaction_token'],
-            store_in_db=True,
+            audiences=['djfapi.auth.obtain_transaction_token'],
         )
 
-        self._save_user_token(id=token_id)
+        self._save_user_token(token_id)
 
         return token
 

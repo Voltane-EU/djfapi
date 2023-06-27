@@ -1,11 +1,16 @@
 from typing import Optional, Union, List
+from asyncio import get_event_loop
 from jose import jwt
 from fastapi import HTTPException
 from fastapi.security import SecurityScopes
 from fastapi.security.api_key import APIKeyHeader
 from starlette.requests import Request
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.auth.models import Permission
 from djdantic import context
+from asgiref.sync import sync_to_async
 from djdantic.schemas import Error, Access, AccessToken, AccessScope
 from sentry_tools import set_user, set_extra
 from ..exceptions import AuthError
@@ -40,7 +45,53 @@ class JWTToken(APIKeyHeader):
             },
         )
 
-    async def __call__(self, request: Request, scopes: SecurityScopes = None) -> Optional[Access]:
+    def _set_scopes(self, access: Access, scopes: SecurityScopes):
+        if not scopes.scopes:
+            return
+
+        audiences = access.token.has_audiences(scopes.scopes)
+        if not audiences:
+            raise HTTPException(
+                status_code=403,
+                detail=Error(
+                    type='JWTClaimsError',
+                    code='required_audience_missing',
+                    message='The required scope is not included in the given token.',
+                    detail=scopes.scopes,
+                ),
+            )
+
+        aud_scopes = [AccessScope.from_str(audience) for audience in audiences]
+        access.scopes = aud_scopes
+        access.scope = aud_scopes[0]
+        set_extra('access.scopes', aud_scopes)
+
+    async def _create_access(self, token):
+        access = Access(
+            token=AccessToken(**self.decode_token(token)),
+        )
+        set_extra('access.token.aud', access.token.aud)
+
+        return access
+
+    async def get_access(self, token, scopes: Optional[SecurityScopes] = None):
+        access = await self._create_access(token)
+
+        set_user(
+            {
+                'id': access.user_id,
+                'tenant_id': access.tenant_id,
+            }
+        )
+
+        if scopes:
+            self._set_scopes(access, scopes)
+
+        context.access.set(access)
+
+        return access
+
+    async def __call__(self, request: Request, scopes: SecurityScopes) -> Optional[Access]:
         try:
             token = await super().__call__(request)
 
@@ -53,31 +104,15 @@ class JWTToken(APIKeyHeader):
         if not token:
             return
 
-        current_access = Access(
-            token=AccessToken(**self.decode_token(token)),
-        )
-        set_extra('access.token.aud', current_access.token.aud)
+        return await self.get_access(token, scopes)
 
-        set_user({
-            'id': current_access.user_id,
-            'tenant_id': current_access.tenant_id,
-        })
 
-        if scopes and scopes.scopes:
-            audiences = current_access.token.has_audiences(scopes.scopes)
-            if not audiences:
-                raise HTTPException(status_code=403, detail=Error(
-                    type='JWTClaimsError',
-                    code='required_audience_missing',
-                    message='The required scope is not included in the given token.',
-                    detail=scopes.scopes,
-                ))
+class JWTTokenDjangoPermissions(JWTToken):
+    async def get_user(self, access: Access):
+        return await get_user_model().objects.aget(id=access.user_id)
 
-            aud_scopes = [AccessScope.from_str(audience) for audience in audiences]
-            current_access.scopes = aud_scopes
-            current_access.scope = aud_scopes[0]
-            set_extra('access.scopes', aud_scopes)
-
-        context.access.set(current_access)
-
-        return current_access
+    async def _create_access(self, token):
+        access = await super()._create_access(token)
+        user = await self.get_user(access)
+        access.token.aud = list(await sync_to_async(user.get_all_permissions)())
+        return access
