@@ -66,9 +66,12 @@ class JWTToken(APIKeyHeader):
         access.scope = aud_scopes[0]
         set_extra('access.scopes', aud_scopes)
 
-    async def _create_access(self, token):
+    async def _create_access(self, token: str):
+        if not token:
+            raise AuthError
+
         access = Access(
-            token=AccessToken(**self.decode_token(token)),
+            token=AccessToken(**self.decode_token(token.removeprefix("Bearer").strip())),
         )
         set_extra('access.token.aud', access.token.aud)
 
