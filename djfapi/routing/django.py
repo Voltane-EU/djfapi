@@ -41,6 +41,7 @@ class DjangoRouterSchema(RouterSchema):
     aggregate_fields: Optional[Union[Type[Enum], UndefinedType]] = None
     aggregate_group_by: Optional[Type[Enum]] = None
     register_router: Optional[Tuple[list, dict]] = None
+    do_include_query_fields_in_schema: bool = True
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
@@ -553,6 +554,7 @@ class DjangoRouterSchema(RouterSchema):
 
             query_options = {
                 'default': None,
+                'include_in_schema': self.do_include_query_fields_in_schema,
             }
 
             if isinstance(field, (models.ForeignKey, models.ManyToManyField)):
@@ -639,7 +641,10 @@ class DjangoRouterSchema(RouterSchema):
                 forge.modify(
                     'order_by',
                     type=Optional[List[self.order_fields]],
-                    default=Query(self.pagination_options.get('default_order_by', list())),
+                    default=Query(
+                        self.pagination_options.get('default_order_by', list()),
+                        include_in_schema=self.do_include_query_fields_in_schema,
+                    ),
                 )(depends_pagination(**self.pagination_options))
             ),
         )
