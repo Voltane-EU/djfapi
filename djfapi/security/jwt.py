@@ -1,5 +1,4 @@
 from typing import Optional, Union, List
-from asyncio import get_event_loop
 from jose import jwt
 from fastapi import HTTPException
 from fastapi.security import SecurityScopes
@@ -7,8 +6,7 @@ from fastapi.security.api_key import APIKeyHeader
 from starlette.requests import Request
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.contenttypes.models import ContentType
-from django.contrib.auth.models import Permission
+from django.core.exceptions import ObjectDoesNotExist
 from djdantic import context
 from asgiref.sync import sync_to_async
 from djdantic.schemas import Error, Access, AccessToken, AccessScope
@@ -112,7 +110,11 @@ class JWTToken(APIKeyHeader):
 
 class JWTTokenDjangoPermissions(JWTToken):
     async def get_user(self, access: Access):
-        return await get_user_model().objects.aget(id=access.user_id)
+        try:
+            return await get_user_model().objects.aget(id=access.user_id)
+
+        except ObjectDoesNotExist as error:
+            raise AuthError from error
 
     async def _create_access(self, token):
         access = await super()._create_access(token)
