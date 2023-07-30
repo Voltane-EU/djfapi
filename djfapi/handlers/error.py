@@ -1,6 +1,5 @@
 import logging
 from typing import Any, Optional
-from psycopg2.errorcodes import lookup as psycopg2_error_lookup
 from jose.exceptions import JOSEError, ExpiredSignatureError
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
@@ -11,6 +10,19 @@ from django.db.utils import IntegrityError, OperationalError, InternalError
 from django.db.models import RestrictedError, ProtectedError
 from djdantic.schemas import Error
 from djdantic.exceptions import AccessError
+
+try:
+    from psycopg2.errorcodes import lookup
+
+    db_error_lookup = lambda exc: lookup(exc.pgcode).lower()
+
+except ImportError:
+    from psycopg.errors import _sqlcodes
+
+    db_error_lookup = lambda exc: list(
+        {code: err for code, err in _sqlcodes.items() if isinstance(exc, err)}.keys(),
+    )[1].lower()
+
 
 try:
     from sentry_sdk import last_event_id, capture_exception as _capture_exception
@@ -32,7 +44,13 @@ def capture_exception(exc):
     return _capture_exception(exc)
 
 
-async def respond_details(request: Request, content: Any, status_code: int = 500, headers: Optional[dict] = None, event_id: Optional[str] = None):
+async def respond_details(
+    request: Request,
+    content: Any,
+    status_code: int = 500,
+    headers: Optional[dict] = None,
+    event_id: Optional[str] = None,
+):
     response = {
         'detail': jsonable_encoder(content),
     }
@@ -89,7 +107,7 @@ async def integrity_error_handler(request: Request, exc: IntegrityError):
     code = None
     if not isinstance(exc, (RestrictedError, ProtectedError)) and exc.__cause__:
         try:
-            code = psycopg2_error_lookup(exc.__cause__.pgcode).lower()
+            code = db_error_lookup(exc.__cause__)
             if exc.__cause__.diag.constraint_name:
                 code += ":" + exc.__cause__.diag.constraint_name
 

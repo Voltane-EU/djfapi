@@ -1,13 +1,22 @@
 from decimal import Decimal
 from typing import List, Optional, Union
 from enum import Enum
-from psycopg2 import errorcodes as psycopg2_error_codes
 from pydantic import BaseModel, Extra
 from pydantic.error_wrappers import ErrorWrapper
 from django.db.models import Q, QuerySet, Manager, aggregates
 from django.db.utils import ProgrammingError
 from fastapi.exceptions import RequestValidationError
 from .fastapi import Pagination
+
+try:
+    from psycopg2.errorcodes import UNDEFINED_FUNCTION
+
+    UndefinedFunction = None
+
+except ImportError:
+    from psycopg.errors import UndefinedFunction
+
+    UNDEFINED_FUNCTION = None
 
 
 class AggregationFunction(Enum):
@@ -52,13 +61,13 @@ def aggregation(
                 return [query]
 
         except ProgrammingError as error:
-            if error.__cause__.pgcode in (psycopg2_error_codes.UNDEFINED_FUNCTION):
-                raise RequestValidationError([
-                    ErrorWrapper(ProgrammingError(), ("query", "aggregation_function"))
-                ]) from error
+            if (UndefinedFunction and isinstance(error.__cause__, UndefinedFunction)) or (
+                UNDEFINED_FUNCTION and error.__cause__.pgcode == UNDEFINED_FUNCTION
+            ):
+                raise RequestValidationError(
+                    [ErrorWrapper(ProgrammingError(), ('query', 'aggregation_function'))]
+                ) from error
 
             raise
 
-    return {
-        'values': aggregate()
-    }
+    return {'values': aggregate()}
