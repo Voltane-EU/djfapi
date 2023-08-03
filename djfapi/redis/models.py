@@ -11,4 +11,4 @@ class AbstractUserTransactionTokenDjangoPermissions2RedisMixin:
 
         key = f'access:token:{token_id}:scopes'
         self.redis.sadd(key, *self.get_all_permissions())
-        self.redis.expire(key, int(timedelta(minutes=5).total_seconds()))
+        self.redis.expire(key, 310)  # Transaction Token expires after 5 minutes (300s) + buffer (10s)
