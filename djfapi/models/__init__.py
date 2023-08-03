@@ -1,1 +1,5 @@
-from .user import AbstractUserTokenMixin, AbstractUserRefreshTokenMixin, AbstractUserTransactionTokenMixin
+from .user import (
+    AbstractUserTokenMixin,
+    AbstractUserRefreshTokenMixin,
+    AbstractUserTransactionTokenMixin,
+)

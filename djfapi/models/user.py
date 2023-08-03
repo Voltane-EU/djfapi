@@ -11,8 +11,11 @@ from ..exceptions import AuthError
 
 
 class AbstractUserTokenMixin(models.Model):
-    def _save_user_token(self, token_id):
+    def _save_user_token(self, token_id: str):
         raise NotImplementedError
+
+    def _save_transaction_token(self, token_id: str):
+        return
 
     def _get_user_token(self, token_id: str):
         raise NotImplementedError
@@ -73,11 +76,13 @@ class AbstractUserTransactionTokenMixin(AbstractUserTokenMixin):
         if used_token:
             self._get_user_token(used_token.jti)
 
-        token, _ = self._create_token(
+        token, token_id = self._create_token(
             validity=timedelta(minutes=5),
             audiences=audiences,
             include_critical=include_critical,
         )
+
+        self._save_transaction_token(token_id)
 
         return token
 
