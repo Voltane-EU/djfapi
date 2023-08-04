@@ -1,10 +1,12 @@
 from decimal import Decimal
+from functools import wraps
 from typing import List, Optional, Union
 from enum import Enum
 from pydantic import BaseModel, Extra
 from pydantic.error_wrappers import ErrorWrapper
 from django.db.models import Q, QuerySet, Manager, aggregates
 from django.db.utils import ProgrammingError
+from django.core import signals
 from fastapi.exceptions import RequestValidationError
 from .fastapi import Pagination
 
@@ -71,3 +73,14 @@ def aggregation(
             raise
 
     return {'values': aggregate()}
+
+
+def request_signalling(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        signals.request_started.send(sender='request_signalling_wrapper')
+        result = func(*args, **kwargs)
+        signals.request_finished.send(sender='request_signalling_wrapper')
+        return result
+
+    return wrapper

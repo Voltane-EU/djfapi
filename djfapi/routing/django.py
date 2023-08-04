@@ -4,9 +4,10 @@ from enum import Enum
 from functools import cached_property, wraps
 from typing import Any, List, Optional, Tuple, Type, TypeVar, Union
 import forge
+from asgiref.sync import sync_to_async
 from pydantic import create_model, constr
 from pydantic.fields import Undefined, UndefinedType
-from django.db import models, connections
+from django.db import models, connections, close_old_connections
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response, Request
 from fastapi.security.base import SecurityBase
 from starlette.status import HTTP_204_NO_CONTENT
@@ -17,7 +18,7 @@ from djdantic.utils.typing import get_field_type
 from djdantic.utils.dict import remove_none
 from djdantic.schemas.access import AccessScope
 from ..utils.fastapi import Pagination, depends_pagination
-from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse
+from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse, request_signalling
 from ..exceptions import ValidationError
 from ..schemas import errors as error_schemas
 from .base import TBaseModel, TCreateModel, TUpdateModel
@@ -689,7 +690,7 @@ class DjangoRouterSchema(RouterSchema):
             @wraps(endpoint)
             def wrapped(*args, request: Request, response: Response, **kwargs):
                 self.depends_response_headers(method=method, request=request, response=response)
-                return endpoint(*args, request=request, response=response, **kwargs)
+                return request_signalling(endpoint)(*args, request=request, response=response, **kwargs)
 
             return wrapped
 
