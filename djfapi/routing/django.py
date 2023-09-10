@@ -8,6 +8,7 @@ from asgiref.sync import sync_to_async
 from pydantic import create_model, constr
 from pydantic.fields import Undefined, UndefinedType
 from django.db import models, connections, close_old_connections
+from django.db.transaction import atomic
 from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response, Request
 from fastapi.security.base import SecurityBase
 from starlette.status import HTTP_204_NO_CONTENT
@@ -373,6 +374,7 @@ class DjangoRouterSchema(RouterSchema):
     ) -> TDjangoModel:
         return self.get_queryset(parent_ids, access).get(id=id)
 
+    @atomic
     def object_create(
         self,
         *,
@@ -400,6 +402,7 @@ class DjangoRouterSchema(RouterSchema):
 
         return instances
 
+    @atomic
     def object_update(
         self,
         *,
@@ -416,6 +419,7 @@ class DjangoRouterSchema(RouterSchema):
             access=access,
         )
 
+    @atomic
     def object_delete(self, *, access: Optional[Access] = None, instance: TDjangoModel):
         if self.delete_status:
             instance.status = self.delete_status
