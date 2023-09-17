@@ -515,7 +515,7 @@ class DjangoRouterSchema(RouterSchema):
                 query.negate()
 
             else:
-                query = models.Q(**{arg[5:]: value})
+                query = models.Q(**{arg: value})
 
             q &= query
 
