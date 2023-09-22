@@ -154,6 +154,8 @@ class DjangoRouterSchema(RouterSchema):
                         models.DecimalField,
                         models.ManyToManyRel,
                         models.ManyToOneRel,
+                        # TODO only include Charfield if aggregate function is count
+                        models.CharField,
                     ),
                 )
             }
@@ -737,6 +739,8 @@ class DjangoRouterSchema(RouterSchema):
             field=field,
             group_by=group_by,
             pagination=pagination,
+            distinct=True if kwargs['request'].query_params.get(
+                'distinct') else False,
         )
 
     def _create_endpoint_aggregate(self):

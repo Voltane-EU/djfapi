@@ -44,12 +44,21 @@ def aggregation(
     field: Enum,
     group_by: Optional[List[str]] = None,
     pagination: Pagination,
+    distinct: bool = False,
 ):
     def aggregate():
         query = objects.filter(q_filters)
         fields = []
+        if distinct and field.value == '*':
+            raise RequestValidationError(
+                [ErrorWrapper(ValueError(), ('query', 'distinct'))]
+            )
+
         annotations = {
-            'value': getattr(aggregates, aggregation_function.value.title())(field.value),
+            'value': getattr(
+                aggregates,
+                aggregation_function.value.title()
+            )(field.value, distinct=distinct),
         }
 
         try:
