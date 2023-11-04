@@ -114,7 +114,7 @@ class JWTToken(APIKeyHeader):
 
 class JWTTokenDjangoPermissions(JWTToken):
     DJANGO_PERMISSION_REGEX = (
-        r"^(?P<service>[_\w]+)\.(?P<action>[^a-zA-Z0-9]+)_(?P<resource>[^a-zA-Z0-9]+)(_(?P<selector>.*))?$"
+        r"^(?P<service>[_\w]+)\.(?P<action>[a-zA-Z0-9]+)_(?P<resource>[a-zA-Z0-9]+)(_(?P<selector>.*))?$"
     )
     DJANGO_PERMISSION_ACTION_TO_CRUD = {
         'add': 'create',
