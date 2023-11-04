@@ -1,16 +1,20 @@
-from typing import Optional, Union, List
-from jose import jwt
-from fastapi import HTTPException
-from fastapi.security import SecurityScopes
-from fastapi.security.api_key import APIKeyHeader
-from starlette.requests import Request
+import re
+from functools import lru_cache
+from typing import List, Optional, Union
+
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from djdantic import context
-from asgiref.sync import sync_to_async
-from djdantic.schemas import Error, Access, AccessToken, AccessScope
-from sentry_tools import set_user, set_extra
+from djdantic.schemas import Access, AccessScope, AccessToken, Error
+from fastapi import HTTPException
+from fastapi.security import SecurityScopes
+from fastapi.security.api_key import APIKeyHeader
+from jose import jwt
+from sentry_tools import set_extra, set_user
+from starlette.requests import Request
+
 from ..exceptions import AuthError
 
 
@@ -109,6 +113,31 @@ class JWTToken(APIKeyHeader):
 
 
 class JWTTokenDjangoPermissions(JWTToken):
+    DJANGO_PERMISSION_REGEX = r"^(?P<service>[_\w]+)\.(?P<action>\w+)_(?P<resource>\w+)(_(?P<selector>.*))?$"
+    DJANGO_PERMISSION_ACTION_TO_CRUD = {
+        'add': 'create',
+        'view': 'read',
+        'change': 'update',
+        'delete': 'delete',
+    }
+
+    @classmethod
+    @lru_cache
+    def convert_permission_to_scope(cls, permission: str):
+        match = re.match(cls.DJANGO_PERMISSION_REGEX, permission)
+        if not match:
+            raise ValueError('permission is malformed')
+
+        scope = [
+            match.group("service"),
+            match.group("resource"),
+            cls.DJANGO_PERMISSION_ACTION_TO_CRUD[match.group("action")],
+        ]
+        if match.group('action') != 'add':
+            scope.append(match.group("selector") or "any")
+
+        return '.'.join(scope)
+
     async def get_user(self, access: Access):
         try:
             return await get_user_model().objects.aget(id=access.user_id)
@@ -119,5 +148,8 @@ class JWTTokenDjangoPermissions(JWTToken):
     async def _create_access(self, token):
         access = await super()._create_access(token)
         user = await self.get_user(access)
-        access.token.aud = list(await sync_to_async(user.get_all_permissions)())
+        access.token.aud = [
+            self.convert_permission_to_scope(permission)
+            for permission in await sync_to_async(user.get_all_permissions)()
+        ]
         return access
