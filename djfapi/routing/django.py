@@ -515,7 +515,9 @@ class DjangoRouterSchema(RouterSchema):
         q = models.Q()
 
         if _request:
-            used_params = [field for name, field in self.search_filter_fields.items() if name in _request.query_params]
+            used_params = [
+                field for field in self.search_filter_fields.values() if field.alias in _request.query_params
+            ]
             query_values, query_errors = request_params_to_args(used_params, _request.query_params)
 
             if query_errors:
