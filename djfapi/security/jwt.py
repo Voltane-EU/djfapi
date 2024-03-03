@@ -135,7 +135,7 @@ class JWTTokenDjangoPermissions(JWTToken):
             match.group("resource"),
             cls.DJANGO_PERMISSION_ACTION_TO_CRUD[match.group("action")],
         ]
-        if match.group('action') != 'add':
+        if match.group('action') != 'add' or match.group("selector"):
             scope.append(match.group("selector") or "any")
 
         return '.'.join(scope)
