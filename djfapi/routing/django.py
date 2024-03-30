@@ -22,7 +22,7 @@ from pydantic import constr, create_model
 from pydantic.fields import ModelField, Undefined, UndefinedType
 from starlette.status import HTTP_204_NO_CONTENT
 
-from ..exceptions import ValidationError
+from ..exceptions import AccessError, ValidationError
 from ..schemas import errors as error_schemas
 from ..utils.fastapi import Pagination, depends_pagination
 from ..utils.fastapi_django import AggregateResponse, AggregationFunction, aggregation, request_signalling
@@ -268,9 +268,9 @@ class DjangoRouterSchema(RouterSchema):
             '',
             methods=['POST'],
             endpoint=self._create_endpoint_post(),
-            response_model=Union[self.get_referenced, List[self.get_referenced]]
-            if self.create_multi
-            else self.get_referenced,
+            response_model=(
+                Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced
+            ),
             summary=f'{self.model.__name__} create',
             responses=self._additional_responses(Method.POST),
         )
@@ -403,6 +403,15 @@ class DjangoRouterSchema(RouterSchema):
                 setattr(instance, self.parent.id_field, parent_id)
 
             transfer_to_orm(el, instance, action=TransferAction.CREATE, access=access)
+            try:
+                # Try to access newly created instance to check security rules
+                self.model.objects.filter(self.objects_filter(access)).get(
+                    pk=instance.pk,
+                )
+
+            except self.model.DoesNotExist as error:
+                raise AccessError from error
+
             instances.append(instance)
 
         return instances
@@ -640,9 +649,9 @@ class DjangoRouterSchema(RouterSchema):
             if field.choices or getattr(field, 'primary_key', False):
                 query_options['alias'] = field_name
                 if field_name == 'status' and self.delete_status:
-                    query_options[
-                        'description'
-                    ] = f"When not set, objects with status {self.delete_status} are excluded"
+                    query_options['description'] = (
+                        f"When not set, objects with status {self.delete_status} are excluded"
+                    )
 
                 field_name += '__in'
                 field_type = List[field_type]
@@ -808,9 +817,11 @@ class DjangoRouterSchema(RouterSchema):
             signature=[
                 forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
                 forge.kwarg('field', type=self.aggregated_fields, default=Path(...)),
-                forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None))
-                if self.aggregate_group_by is not ...
-                else None,
+                (
+                    forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None))
+                    if self.aggregate_group_by is not ...
+                    else None
+                ),
             ],
         )(self.endpoint_aggregate)
 
