@@ -10,7 +10,14 @@ from django.db.transaction import atomic
 from djdantic.schemas import Access, Error
 from djdantic.schemas.access import AccessScope
 from djdantic.utils.dict import remove_none
-from djdantic.utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
+from djdantic.utils.pydantic import (
+    IdAddedModel,
+    OptionalModel,
+    ReferencedModel,
+    id_added_model,
+    include_reference,
+    optional_model,
+)
 from djdantic.utils.pydantic_django import TransferAction, transfer_to_orm
 from djdantic.utils.typing import get_field_type
 from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response, Security
@@ -135,9 +142,14 @@ class DjangoRouterSchema(RouterSchema):
     @cached_property
     def update_optional(self):
         if not issubclass(self.update, OptionalModel):
-            return to_optional()(self.update)
+            return optional_model(self.update)
 
         return self.update
+
+    @cached_property
+    def update_id_added(self):
+        if not issubclass(self.update, IdAddedModel):
+            return id_added_model(self.update)
 
     @cached_property
     def aggregated_fields(self) -> Enum:
@@ -876,7 +888,7 @@ class DjangoRouterSchema(RouterSchema):
         return self.endpoint(
             Method.PUT,
             signature=[
-                forge.kwarg('data', type=self.update, default=Body(...)),
+                forge.kwarg('data', type=self.update_id_added, default=Body(...)),
             ],
         )(self.endpoint_put)
 
