@@ -263,6 +263,7 @@ class DjangoRouterSchema(RouterSchema):
             response_model=self.list,
             summary=f'{self.model.__name__} list',
             responses=self._additional_responses(Method.GET_LIST),
+            openapi_extra={'_djfapi_query_fields': self.search_filter_fields},
         )
 
     def _create_route_aggregate(self):
