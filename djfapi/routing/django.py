@@ -40,6 +40,10 @@ from .registry import register_router
 TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
 
 
+_list_models = {}
+_generated_enums = {}
+
+
 class DjangoRouterSchema(RouterSchema):
     __router: APIRouter = None
 
@@ -66,9 +70,12 @@ class DjangoRouterSchema(RouterSchema):
             self._create_router()
 
     def _init_list(self):
-        self.list = create_model(
-            f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get_referenced], ...)
-        )
+        if not self.get in _list_models:
+            _list_models[self.get] = create_model(
+                f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get_referenced], ...)
+            )
+
+        self.list = _list_models[self.get]
 
     @property
     def name_singular(self) -> str:
@@ -117,7 +124,12 @@ class DjangoRouterSchema(RouterSchema):
                         recursion_tree=[*recursion_tree, model],
                     )
 
-        return Enum(f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)})
+        if (self.model, 'Fields') not in _generated_enums:
+            _generated_enums[self.model, 'Fields'] = Enum(
+                f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)}
+            )
+
+        return _generated_enums[self.model, 'Fields']
 
     @cached_property
     def order_fields(self):
@@ -130,7 +142,12 @@ class DjangoRouterSchema(RouterSchema):
             fields.append(name)
             fields.append('-' + name)
 
-        return Enum(f'{self.model.__name__}OrderFields', {field: field for field in fields})
+        if (self.model, 'OrderFields') not in _generated_enums:
+            _generated_enums[self.model, 'OrderFields'] = Enum(
+                f'{self.model.__name__}OrderFields', {field: field for field in fields}
+            )
+
+        return _generated_enums[self.model, 'OrderFields']
 
     @cached_property
     def get_referenced(self):
@@ -177,7 +194,10 @@ class DjangoRouterSchema(RouterSchema):
                 )
             }
         )
-        return Enum(f'{self.model.__name__}AggregateFields', fields)
+        if (self.model, 'AggregateFields') not in _generated_enums:
+            _generated_enums[self.model, 'AggregateFields'] = Enum(f'{self.model.__name__}AggregateFields', fields)
+
+        return _generated_enums[self.model, 'AggregateFields']
 
     @cached_property
     def get_aggregate_group_by(self) -> Enum:
@@ -196,10 +216,13 @@ class DjangoRouterSchema(RouterSchema):
                     for field_name, _field_type in self._get_field_variations(field.value):
                         yield field_name
 
-        return Enum(
-            f'{self.model.__name__}GroupByFields',
-            {field_name: field_name for field_name in generate_group_by_fields()},
-        )
+        if (self.model, 'GroupByFields') not in _generated_enums:
+            _generated_enums[self.model, 'GroupByFields'] = Enum(
+                f'{self.model.__name__}GroupByFields',
+                {field_name: field_name for field_name in generate_group_by_fields()},
+            )
+
+        return _generated_enums[self.model, 'GroupByFields']
 
     @property
     def router(self) -> APIRouter:
