@@ -1,31 +1,47 @@
+import warnings
 from datetime import date
 from enum import Enum
 from functools import cached_property, wraps
-from typing import Any, List, Optional, Tuple, Type, TypeVar, Union, Generator, Dict
+from typing import Any, Dict, Generator, List, Optional, Tuple, Type, TypeVar, Union
+
 import forge
-from pydantic import create_model, constr
-from pydantic.fields import Undefined, UndefinedType
-from django.db import models, connections
+from django.db import connections, models
 from django.db.transaction import atomic
-from fastapi import APIRouter, Security, Path, Body, Depends, Query, Response, Request
-from fastapi.security.base import SecurityBase
-from starlette.status import HTTP_204_NO_CONTENT
 from djdantic.schemas import Access, Error
-from djdantic.utils.pydantic_django import transfer_to_orm, TransferAction
-from djdantic.utils.pydantic import OptionalModel, ReferencedModel, include_reference, to_optional
-from djdantic.utils.typing import get_field_type
-from djdantic.utils.dict import remove_none
 from djdantic.schemas.access import AccessScope
-from ..utils.fastapi import Pagination, depends_pagination
-from ..utils.fastapi_django import AggregationFunction, aggregation, AggregateResponse, request_signalling
-from ..exceptions import ValidationError
+from djdantic.utils.dict import remove_none
+from djdantic.utils.pydantic import (
+    IdAddedModel,
+    OptionalModel,
+    ReferencedModel,
+    id_added_model,
+    include_reference,
+    optional_model,
+)
+from djdantic.utils.pydantic_django import TransferAction, transfer_to_orm
+from djdantic.utils.typing import get_field_type
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response, Security
+from fastapi._compat import _normalize_errors
+from fastapi.dependencies.utils import analyze_param, request_params_to_args
+from fastapi.exceptions import RequestValidationError
+from fastapi.security.base import SecurityBase
+from pydantic import constr, create_model
+from pydantic.fields import ModelField, Undefined, UndefinedType
+from starlette.status import HTTP_204_NO_CONTENT
+
+from ..exceptions import AccessError, ValidationError
 from ..schemas import errors as error_schemas
+from ..utils.fastapi import Pagination, depends_pagination
+from ..utils.fastapi_django import AggregateResponse, AggregationFunction, aggregation, request_signalling
+from . import Method, RouterSchema, SecurityScopes  # noqa  # import SecurityScopes for user friendly import
 from .base import TBaseModel, TCreateModel, TUpdateModel
 from .registry import register_router
-from . import RouterSchema, Method, SecurityScopes  # noqa  # import SecurityScopes for user friendly import
-
 
 TDjangoModel = TypeVar('TDjangoModel', bound=models.Model)
+
+
+_list_models = {}
+_generated_enums = {}
 
 
 class DjangoRouterSchema(RouterSchema):
@@ -41,7 +57,7 @@ class DjangoRouterSchema(RouterSchema):
     aggregate_fields: Optional[Union[Type[Enum], UndefinedType]] = None
     aggregate_group_by: Optional[Type[Enum]] = None
     register_router: Optional[Tuple[list, dict]] = None
-    do_include_query_fields_in_schema: bool = True
+    do_include_query_fields_in_schema: bool = False
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
@@ -54,9 +70,12 @@ class DjangoRouterSchema(RouterSchema):
             self._create_router()
 
     def _init_list(self):
-        self.list = create_model(
-            f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get_referenced], ...)
-        )
+        if not self.get in _list_models:
+            _list_models[self.get] = create_model(
+                f"{self.get.__qualname__}List", __module__=self.get.__module__, items=(List[self.get_referenced], ...)
+            )
+
+        self.list = _list_models[self.get]
 
     @property
     def name_singular(self) -> str:
@@ -105,7 +124,12 @@ class DjangoRouterSchema(RouterSchema):
                         recursion_tree=[*recursion_tree, model],
                     )
 
-        return Enum(f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)})
+        if (self.model, 'Fields') not in _generated_enums:
+            _generated_enums[self.model, 'Fields'] = Enum(
+                f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)}
+            )
+
+        return _generated_enums[self.model, 'Fields']
 
     @cached_property
     def order_fields(self):
@@ -118,7 +142,12 @@ class DjangoRouterSchema(RouterSchema):
             fields.append(name)
             fields.append('-' + name)
 
-        return Enum(f'{self.model.__name__}OrderFields', {field: field for field in fields})
+        if (self.model, 'OrderFields') not in _generated_enums:
+            _generated_enums[self.model, 'OrderFields'] = Enum(
+                f'{self.model.__name__}OrderFields', {field: field for field in fields}
+            )
+
+        return _generated_enums[self.model, 'OrderFields']
 
     @cached_property
     def get_referenced(self):
@@ -130,9 +159,14 @@ class DjangoRouterSchema(RouterSchema):
     @cached_property
     def update_optional(self):
         if not issubclass(self.update, OptionalModel):
-            return to_optional()(self.update)
+            return optional_model(self.update)
 
         return self.update
+
+    @cached_property
+    def update_id_added(self):
+        if not issubclass(self.update, IdAddedModel):
+            return id_added_model(self.update)
 
     @cached_property
     def aggregated_fields(self) -> Enum:
@@ -160,7 +194,10 @@ class DjangoRouterSchema(RouterSchema):
                 )
             }
         )
-        return Enum(f'{self.model.__name__}AggregateFields', fields)
+        if (self.model, 'AggregateFields') not in _generated_enums:
+            _generated_enums[self.model, 'AggregateFields'] = Enum(f'{self.model.__name__}AggregateFields', fields)
+
+        return _generated_enums[self.model, 'AggregateFields']
 
     @cached_property
     def get_aggregate_group_by(self) -> Enum:
@@ -179,10 +216,13 @@ class DjangoRouterSchema(RouterSchema):
                     for field_name, _field_type in self._get_field_variations(field.value):
                         yield field_name
 
-        return Enum(
-            f'{self.model.__name__}GroupByFields',
-            {field_name: field_name for field_name in generate_group_by_fields()},
-        )
+        if (self.model, 'GroupByFields') not in _generated_enums:
+            _generated_enums[self.model, 'GroupByFields'] = Enum(
+                f'{self.model.__name__}GroupByFields',
+                {field_name: field_name for field_name in generate_group_by_fields()},
+            )
+
+        return _generated_enums[self.model, 'GroupByFields']
 
     @property
     def router(self) -> APIRouter:
@@ -246,6 +286,7 @@ class DjangoRouterSchema(RouterSchema):
             response_model=self.list,
             summary=f'{self.model.__name__} list',
             responses=self._additional_responses(Method.GET_LIST),
+            openapi_extra={'_djfapi_query_fields': self.search_filter_fields},
         )
 
     def _create_route_aggregate(self):
@@ -263,9 +304,9 @@ class DjangoRouterSchema(RouterSchema):
             '',
             methods=['POST'],
             endpoint=self._create_endpoint_post(),
-            response_model=Union[self.get_referenced, List[self.get_referenced]]
-            if self.create_multi
-            else self.get_referenced,
+            response_model=(
+                Union[self.get_referenced, List[self.get_referenced]] if self.create_multi else self.get_referenced
+            ),
             summary=f'{self.model.__name__} create',
             responses=self._additional_responses(Method.POST),
         )
@@ -398,6 +439,15 @@ class DjangoRouterSchema(RouterSchema):
                 setattr(instance, self.parent.id_field, parent_id)
 
             transfer_to_orm(el, instance, action=TransferAction.CREATE, access=access)
+            try:
+                # Try to access newly created instance to check security rules
+                self.model.objects.filter(self.objects_filter(access)).get(
+                    pk=instance.pk,
+                )
+
+            except self.model.DoesNotExist as error:
+                raise AccessError from error
+
             instances.append(instance)
 
         return instances
@@ -506,9 +556,22 @@ class DjangoRouterSchema(RouterSchema):
             ],
         )
 
-    def search_filter(self, **kwargs: Dict[str, Any]) -> models.Q:
+    def search_filter(self, _request: Optional[Request] = None, **kwargs: Dict[str, Any]) -> models.Q:
         q = models.Q()
-        for arg, value in kwargs.items():
+
+        if _request:
+            used_params = [
+                field for field in self.search_filter_fields.values() if field.alias in _request.query_params
+            ]
+            query_values, query_errors = request_params_to_args(used_params, _request.query_params)
+
+            if query_errors:
+                raise RequestValidationError(_normalize_errors(query_errors))
+
+        else:
+            query_values = kwargs
+
+        for arg, value in query_values.items():
             if value is None:
                 continue
 
@@ -575,7 +638,6 @@ class DjangoRouterSchema(RouterSchema):
 
         query_options = {
             'default': None,
-            'include_in_schema': self.do_include_query_fields_in_schema,
         }
 
         if isinstance(field, (models.ForeignKey, models.ManyToManyField)):
@@ -596,6 +658,7 @@ class DjangoRouterSchema(RouterSchema):
 
         if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
             field_name += '__count'
+            field_type = int
 
         if isinstance(
             field,
@@ -622,9 +685,9 @@ class DjangoRouterSchema(RouterSchema):
             if field.choices or getattr(field, 'primary_key', False):
                 query_options['alias'] = field_name
                 if field_name == 'status' and self.delete_status:
-                    query_options[
-                        'description'
-                    ] = f"When not set, objects with status {self.delete_status} are excluded"
+                    query_options['description'] = (
+                        f"When not set, objects with status {self.delete_status} are excluded"
+                    )
 
                 field_name += '__in'
                 field_type = List[field_type]
@@ -635,23 +698,48 @@ class DjangoRouterSchema(RouterSchema):
 
         yield f'{field_name}', field_type, query_options
 
-    def search_filter_fields(self) -> Generator[forge.FParameter, None, None]:
+    @cached_property
+    def search_filter_fields(
+        self,
+    ) -> Dict[str, ModelField]:
+        fields = {}
         for model_field in self.model_fields:
             for name, type_, options in self._search_filter_field(model_field):
-                yield forge.kwarg(
-                    name,
-                    type=Optional[type_],
-                    default=Query(**options),
-                )
-                yield forge.kwarg(
-                    f'not__{name}',
-                    type=Optional[type_],
-                    default=Query(**{**options, 'alias': '!' + options.get('alias', name)}),
-                )
+                fields[name] = analyze_param(
+                    param_name=name,
+                    annotation=Optional[type_],
+                    value=Query(**options),
+                    is_path_param=False,
+                )[2]
+                fields[f'not__{name}'] = analyze_param(
+                    param_name=f'not__{name}',
+                    annotation=Optional[type_],
+                    value=Query(**{**options, 'alias': '!' + options.get('alias', name)}),
+                    is_path_param=False,
+                )[2]
+
+        return fields
 
     def create_depends_search(self):
-        fields = list(self.search_filter_fields())
-        return forge.sign(*fields)(self.search_filter)
+        if self.do_include_query_fields_in_schema:
+            if len(self.search_filter_fields) > 100:
+                warnings.warn(
+                    "Having search query fields in schema when having more then 100 fields can cause massive performance problems while processing each request"
+                )
+
+            return forge.sign(
+                *[
+                    forge.kwarg(
+                        name,
+                        type=field.annotation,
+                        default=field.field_info,
+                    )
+                    for name, field in self.search_filter_fields.items()
+                ]
+            )(self.search_filter)
+
+        else:
+            return forge.sign(forge.kwarg('_request', type=Request))(self.search_filter)
 
     def _depends_search(self):
         yield forge.kwarg('search', type=models.Q, default=Depends(self.create_depends_search()))
@@ -676,6 +764,23 @@ class DjangoRouterSchema(RouterSchema):
         scopes = self._get_security_scopes(method)
         if scopes:
             description += "Scopes: " + ", ".join([f'`{scope}`' for scope in scopes]) + "\n\n"
+
+        if not self.do_include_query_fields_in_schema:
+            description += (
+                "<details><summary>Query fields</summary>Search query for every field can be negated by prepending <code>!</code><br><br>"
+                + "".join(
+                    f'- <code>{field.alias}</code> ({field.type_.__name__})<br>'
+                    for field in self.search_filter_fields.values()
+                    if field.alias[0] != "!"
+                )
+                + "</details>\n\n"
+            )
+
+            description += (
+                "<details><summary>Order fields</summary>Search order for every field can be reversed (to desc) by prepending <code>-</code><br><br>"
+                + ", ".join(f'<code>{field.name}</code>' for field in self.order_fields if field.name[0] != "-")
+                + "</details>\n\n"
+            )
 
         return description or None
 
@@ -739,8 +844,7 @@ class DjangoRouterSchema(RouterSchema):
             field=field,
             group_by=group_by,
             pagination=pagination,
-            distinct=True if kwargs['request'].query_params.get(
-                'distinct') else False,
+            distinct=True if kwargs['request'].query_params.get('distinct') else False,
         )
 
     def _create_endpoint_aggregate(self):
@@ -749,9 +853,11 @@ class DjangoRouterSchema(RouterSchema):
             signature=[
                 forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
                 forge.kwarg('field', type=self.aggregated_fields, default=Path(...)),
-                forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None))
-                if self.aggregate_group_by is not ...
-                else None,
+                (
+                    forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None))
+                    if self.aggregate_group_by is not ...
+                    else None
+                ),
             ],
         )(self.endpoint_aggregate)
 
@@ -806,7 +912,7 @@ class DjangoRouterSchema(RouterSchema):
         return self.endpoint(
             Method.PUT,
             signature=[
-                forge.kwarg('data', type=self.update, default=Body(...)),
+                forge.kwarg('data', type=self.update_id_added, default=Body(...)),
             ],
         )(self.endpoint_put)
 

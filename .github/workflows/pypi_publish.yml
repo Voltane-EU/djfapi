@@ -3,9 +3,6 @@ name: PyPi Release
 # https://help.github.com/en/actions/reference/events-that-trigger-workflows
 on:
   # Only trigger on release creation
-  push:
-    tags:
-      - '*'
   release:
     types:
       - created
@@ -16,6 +13,9 @@ on:
 
 jobs:
   build:
+    permissions:
+      id-token: write
+
     runs-on: ubuntu-latest
 
     steps:
@@ -35,6 +35,3 @@ jobs:
     - name: Publish to PyPI
       if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        user: __token__
-        password: ${{ secrets.PYPI_TOKEN }}
