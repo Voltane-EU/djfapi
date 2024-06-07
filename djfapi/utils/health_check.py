@@ -6,8 +6,10 @@ def get_health(response: Response) -> Health:
     from health_check.mixins import CheckMixin
     check = CheckMixin()
 
-    failures = any([not plugin.status for plugin in check.plugins if plugin.critical_service])
-    warnings = any([not plugin.status for plugin in check.plugins if not plugin.critical_service])
+    plugins = check.plugins if type(check.plugins) == list else check.plugins.values()
+
+    failures = any([not plugin.status for plugin in plugins if plugin.critical_service])
+    warnings = any([not plugin.status for plugin in plugins if not plugin.critical_service])
 
     health = Health.parse_obj({
         'status': 'FAILURE' if failures else ('WARNING' if warnings else 'OK'),
@@ -19,7 +21,7 @@ def get_health(response: Response) -> Health:
                     'type': error.message_type,
                     'message': error.message,
                 } for error in plugin.errors],
-            } for plugin in check.plugins
+            } for plugin in plugins
         ]
     })
 
