@@ -385,7 +385,8 @@ class DjangoRouterSchema(RouterSchema):
         if not is_aggregated:
             # when searching on related fields, multiple rows are returned, therefore perform a distinct on the primary key
             distinct_fields.add('id')
-            distinct_fields.update(pagination.order_by)
+            if pagination and pagination.order_by:
+                distinct_fields.update(pagination.order_by)
 
         if distinct_fields:
             return queryset.distinct(*distinct_fields)
