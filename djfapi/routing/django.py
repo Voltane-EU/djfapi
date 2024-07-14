@@ -377,14 +377,15 @@ class DjangoRouterSchema(RouterSchema):
             objects = getattr(parent, self.related_name_on_parent)
 
         queryset = objects.filter(self.objects_filter(access))
-        distinct_fields = []
+        distinct_fields = set()
 
         if is_annotated:
             queryset = queryset.annotate(*self._generate_annotations())
 
         if not is_aggregated:
             # when searching on related fields, multiple rows are returned, therefore perform a distinct on the primary key
-            distinct_fields.append('id')
+            distinct_fields.add('id')
+            distinct_fields.update(pagination.order_by)
 
         if distinct_fields:
             return queryset.distinct(*distinct_fields)
