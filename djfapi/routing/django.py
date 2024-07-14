@@ -382,8 +382,8 @@ class DjangoRouterSchema(RouterSchema):
         if is_annotated:
             queryset = queryset.annotate(*self._generate_annotations())
 
-        if not is_aggregated and connections.databases[queryset.db]['ENGINE'] == 'django_cockroachdb':
-            # cockroachdb returns multiple rows when searching on related fields, therefore perform a distinct on the primary key
+        if not is_aggregated:
+            # when searching on related fields, multiple rows are returned, therefore perform a distinct on the primary key
             distinct_fields.append('id')
 
         if distinct_fields:
