@@ -2,7 +2,7 @@ import warnings
 from datetime import date
 from enum import Enum
 from functools import cached_property, wraps
-from typing import Any, Dict, Generator, List, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Type, TypeVar, Union
 
 import forge
 from django.db import connections, models
@@ -97,46 +97,54 @@ class DjangoRouterSchema(RouterSchema):
     def id_field_placeholder(self):
         return '/{%s}' % self.id_field
 
+    def _get_model_fields(
+        self, model, prefix='', recursion_tree=None, max_depth: int = 5
+    ) -> Iterable[Tuple[str, models.Field]]:
+        if max_depth <= 0:
+            return
+
+        if recursion_tree is None:
+            recursion_tree = []
+
+        for field in model._meta.get_fields(include_parents=False):
+            yield f'{prefix}{field.name}', field
+
+            if isinstance(
+                field, (models.ForeignKey, models.ManyToManyField, models.ManyToOneRel, models.ManyToManyRel)
+            ):
+                if self.parent and field.related_model == self.parent.model:
+                    continue
+
+                if field.related_model is model:
+                    continue
+
+                if field.related_model in recursion_tree:
+                    continue
+
+                yield from self._get_model_fields(
+                    field.related_model,
+                    prefix=prefix + field.name + '__',
+                    recursion_tree=[*recursion_tree, model],
+                    max_depth=max_depth - 1,
+                )
+
+    @cached_property
+    def model_fields_dict(self):
+        return {field: ref for field, ref in self._get_model_fields(self.model)}
+
     @cached_property
     def model_fields(self) -> Enum:
-        def _get_model_fields(model, prefix='', recursion_tree=None):
-            if recursion_tree is None:
-                recursion_tree = []
-
-            for field in model._meta.get_fields(include_parents=False):
-                yield f'{prefix}{field.name}', field
-
-                if isinstance(
-                    field, (models.ForeignKey, models.ManyToManyField, models.ManyToOneRel, models.ManyToManyRel)
-                ):
-                    if self.parent and field.related_model == self.parent.model:
-                        continue
-
-                    if field.related_model is model:
-                        continue
-
-                    if field.related_model in recursion_tree:
-                        continue
-
-                    yield from _get_model_fields(
-                        field.related_model,
-                        prefix=prefix + field.name + '__',
-                        recursion_tree=[*recursion_tree, model],
-                    )
-
         if (self.model, 'Fields') not in _generated_enums:
-            _generated_enums[self.model, 'Fields'] = Enum(
-                f'{self.model.__name__}Fields', {field: ref for field, ref in _get_model_fields(self.model)}
-            )
+            # FIXME The generated enum does NOT contain every field given by _get_model_fields
+            _generated_enums[self.model, 'Fields'] = Enum(f'{self.model.__name__}Fields', self.model_fields_dict)
 
         return _generated_enums[self.model, 'Fields']
 
     @cached_property
     def order_fields(self):
         fields = []
-        for field in self.model_fields:
-            name = field._name_
-            if isinstance(field.value, (models.ManyToManyRel, models.ManyToOneRel)):
+        for name, field in self.model_fields_dict.items():
+            if isinstance(field, (models.ManyToManyRel, models.ManyToOneRel)):
                 name += '__count'
 
             fields.append(name)
@@ -619,13 +627,13 @@ class DjangoRouterSchema(RouterSchema):
 
         return variations
 
-    def _search_filter_field(self, model_field) -> Generator[Tuple[str, Type, dict], None, None]:
-        field: models.Field = model_field.value
+    def _search_filter_field(
+        self, field_name: str, field: models.Field
+    ) -> Generator[Tuple[str, Type, dict], None, None]:
         if field.name == 'tenant_id' or (getattr(field, 'primary_key', False) and self.model != field.model):
             return
 
         field_type = get_field_type(field)
-        field_name = model_field._name_
 
         assert (
             isinstance(
@@ -705,8 +713,8 @@ class DjangoRouterSchema(RouterSchema):
         self,
     ) -> Dict[str, ModelField]:
         fields = {}
-        for model_field in self.model_fields:
-            for name, type_, options in self._search_filter_field(model_field):
+        for field_name, model_field in self.model_fields_dict.items():
+            for name, type_, options in self._search_filter_field(field_name, model_field):
                 fields[name] = analyze_param(
                     param_name=name,
                     annotation=Optional[type_],
