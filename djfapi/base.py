@@ -8,7 +8,13 @@ from fastapi import FastAPI
 from fastapi._compat import ModelField
 from fastapi.openapi import utils
 from fastapi.routing import APIRoute
-from fastapi.utils import create_response_field
+
+try:
+    from fastapi.utils import create_response_field
+
+except ImportError:
+    from fastapi.utils import create_model_field as create_response_field  # as of fastapi 0.115.0
+
 from jose.exceptions import JOSEError
 from pydantic import Field, create_model
 from starlette.exceptions import HTTPException
