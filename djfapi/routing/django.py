@@ -715,18 +715,21 @@ class DjangoRouterSchema(RouterSchema):
         fields = {}
         for field_name, model_field in self.model_fields_dict.items():
             for name, type_, options in self._search_filter_field(field_name, model_field):
-                fields[name] = analyze_param(
+                param = analyze_param(
                     param_name=name,
                     annotation=Optional[type_],
                     value=Query(**options),
                     is_path_param=False,
-                )[2]
-                fields[f'not__{name}'] = analyze_param(
+                )
+                fields[name] = getattr(param, 'field', param[2])
+
+                param_not = analyze_param(
                     param_name=f'not__{name}',
                     annotation=Optional[type_],
                     value=Query(**{**options, 'alias': '!' + options.get('alias', name)}),
                     is_path_param=False,
-                )[2]
+                )
+                fields[f'not__{name}'] = getattr(param_not, 'field', param_not[2])
 
         return fields
 
