@@ -2,7 +2,8 @@ import warnings
 from datetime import date
 from enum import Enum
 from functools import cached_property, wraps
-from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Type, TypeVar, Union
+from typing import (Any, Dict, Generator, Iterable, List, Optional, Tuple,
+                    Type, TypeVar, Union)
 
 import forge
 from django.db import connections, models
@@ -10,17 +11,13 @@ from django.db.transaction import atomic
 from djdantic.schemas import Access, Error
 from djdantic.schemas.access import AccessScope
 from djdantic.utils.dict import remove_none
-from djdantic.utils.pydantic import (
-    IdAddedModel,
-    OptionalModel,
-    ReferencedModel,
-    id_added_model,
-    include_reference,
-    optional_model,
-)
+from djdantic.utils.pydantic import (IdAddedModel, OptionalModel,
+                                     ReferencedModel, id_added_model,
+                                     include_reference, optional_model)
 from djdantic.utils.pydantic_django import TransferAction, transfer_to_orm
 from djdantic.utils.typing import get_field_type
-from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response, Security
+from fastapi import (APIRouter, Body, Depends, Path, Query, Request, Response,
+                     Security)
 from fastapi._compat import _normalize_errors
 from fastapi.dependencies.utils import analyze_param, request_params_to_args
 from fastapi.exceptions import RequestValidationError
@@ -32,8 +29,10 @@ from starlette.status import HTTP_204_NO_CONTENT
 from ..exceptions import AccessError, ValidationError
 from ..schemas import errors as error_schemas
 from ..utils.fastapi import Pagination, depends_pagination
-from ..utils.fastapi_django import AggregateResponse, AggregationFunction, aggregation, request_signalling
-from . import Method, RouterSchema, SecurityScopes  # noqa  # import SecurityScopes for user friendly import
+from ..utils.fastapi_django import (AggregateResponse, AggregationFunction,
+                                    aggregation, request_signalling)
+from . import (  # noqa  # import SecurityScopes for user friendly import
+    Method, RouterSchema, SecurityScopes)
 from .base import TBaseModel, TCreateModel, TUpdateModel
 from .registry import register_router
 
@@ -721,7 +720,7 @@ class DjangoRouterSchema(RouterSchema):
                     value=Query(**options),
                     is_path_param=False,
                 )
-                fields[name] = getattr(param, 'field', param[2])
+                fields[name] = getattr(param, 'field') or param[2]
 
                 param_not = analyze_param(
                     param_name=f'not__{name}',
@@ -729,7 +728,7 @@ class DjangoRouterSchema(RouterSchema):
                     value=Query(**{**options, 'alias': '!' + options.get('alias', name)}),
                     is_path_param=False,
                 )
-                fields[f'not__{name}'] = getattr(param_not, 'field', param_not[2])
+                fields[f'not__{name}'] = getattr(param_not, 'field') or param_not[2]
 
         return fields
 
