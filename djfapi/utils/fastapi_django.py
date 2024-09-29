@@ -1,13 +1,15 @@
 from decimal import Decimal
+from enum import Enum
 from functools import wraps
 from typing import List, Optional, Union
-from enum import Enum
+
+from django.core import signals
+from django.db.models import Manager, Q, QuerySet, aggregates
+from django.db.utils import ProgrammingError
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Extra
 from pydantic.error_wrappers import ErrorWrapper
-from django.db.models import Q, QuerySet, Manager, aggregates
-from django.db.utils import ProgrammingError
-from django.core import signals
-from fastapi.exceptions import RequestValidationError
+
 from .fastapi import Pagination
 
 try:
@@ -49,16 +51,13 @@ def aggregation(
     def aggregate():
         query = objects.filter(q_filters)
         fields = []
-        if distinct and field.value == '*':
-            raise RequestValidationError(
-                [ErrorWrapper(ValueError(), ('query', 'distinct'))]
-            )
+        value = field.value if isinstance(field, Enum) else field
+
+        if distinct and value == '*':
+            raise RequestValidationError([ErrorWrapper(ValueError(), ('query', 'distinct'))])
 
         annotations = {
-            'value': getattr(
-                aggregates,
-                aggregation_function.value.title()
-            )(field.value, distinct=distinct),
+            'value': getattr(aggregates, aggregation_function.value.title())(value, distinct=distinct),
         }
 
         try:
