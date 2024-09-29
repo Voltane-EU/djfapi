@@ -294,7 +294,7 @@ class DjangoRouterSchema(RouterSchema):
             response_model=self.list,
             summary=f'{self.model.__name__} list',
             responses=self._additional_responses(Method.GET_LIST),
-            openapi_extra={'_djfapi_query_fields': self.search_filter_fields},
+            openapi_extra={'_djfapi_query_fields': self.search_filter_fields} if len(self.model_fields) < 100 else {},
         )
 
     def _create_route_aggregate(self):
@@ -755,6 +755,7 @@ class DjangoRouterSchema(RouterSchema):
             return forge.sign(forge.kwarg('_request', type=Request))(self.search_filter)
 
     def _depends_search(self):
+        order_fields = self.order_fields if len(self.model_fields) < 100 else str
         yield forge.kwarg('search', type=models.Q, default=Depends(self.create_depends_search()))
         yield forge.kwarg(
             'pagination',
@@ -762,7 +763,7 @@ class DjangoRouterSchema(RouterSchema):
             default=Depends(
                 forge.modify(
                     'order_by',
-                    type=Optional[List[self.order_fields]],
+                    type=Optional[List[order_fields]],
                     default=Query(
                         self.pagination_options.get('default_order_by', list()),
                         include_in_schema=self.do_include_query_fields_in_schema,
@@ -778,7 +779,7 @@ class DjangoRouterSchema(RouterSchema):
         if scopes:
             description += "Scopes: " + ", ".join([f'`{scope}`' for scope in scopes]) + "\n\n"
 
-        if not self.do_include_query_fields_in_schema:
+        if not self.do_include_query_fields_in_schema and len(self.search_filter_fields) <= 100:
             description += (
                 "<details><summary>Query fields</summary>Search query for every field can be negated by prepending <code>!</code><br><br>"
                 + "".join(
@@ -861,13 +862,16 @@ class DjangoRouterSchema(RouterSchema):
         )
 
     def _create_endpoint_aggregate(self):
+        aggregated_fields = self.aggregated_fields if len(self.model_fields) < 100 else str
+        get_aggregate_group_by = self.get_aggregate_group_by if len(self.model_fields) < 100 else str
+
         return self.endpoint(
             Method.GET_AGGREGATE,
             signature=[
                 forge.kwarg('aggregation_function', type=AggregationFunction, default=Path(...)),
-                forge.kwarg('field', type=self.aggregated_fields, default=Path(...)),
+                forge.kwarg('field', type=aggregated_fields, default=Path(...)),
                 (
-                    forge.kwarg('group_by', type=Optional[List[self.get_aggregate_group_by]], default=Query(None))
+                    forge.kwarg('group_by', type=Optional[List[get_aggregate_group_by]], default=Query(None))
                     if self.aggregate_group_by is not ...
                     else None
                 ),
