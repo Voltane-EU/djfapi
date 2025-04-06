@@ -385,21 +385,11 @@ class DjangoRouterSchema(RouterSchema):
             objects = getattr(parent, self.related_name_on_parent)
 
         queryset = objects.filter(self.objects_filter(access))
-        distinct_fields = set()
 
         if is_annotated:
-            queryset = queryset.annotate(*self._generate_annotations())
+            return queryset.annotate(*self._generate_annotations())
 
-        if not is_aggregated:
-            # when searching on related fields, multiple rows are returned, therefore perform a distinct on the primary key
-            distinct_fields.add('id')
-            if pagination and pagination.order_by:
-                distinct_fields.update(order.removeprefix('-') for order in pagination.order_by)
-
-        if distinct_fields:
-            return queryset.distinct(*distinct_fields)
-
-        return queryset
+        return queryset.distinct()
 
     def objects_filter(self, access: Optional[Access] = None) -> models.Q:
         """
